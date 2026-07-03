@@ -169,7 +169,9 @@ export const fetchCjProducts = createServerFn(
 
       return rawList.map((item: any) => {
         const norm = normalizeCjItem(item, payload.category);
-        const { id, title: normTitle, image: normImage, sku: normSku, category: normCat } = norm;
+        // Ensure id is always a string so .slice() never throws
+        const id = String(norm.id);
+        const { title: normTitle, image: normImage, sku: normSku, category: normCat } = norm;
 
         // Check overrides
         const override = productOverrides[id] || productOverrides[normSku];
@@ -180,9 +182,9 @@ export const fetchCjProducts = createServerFn(
         const priceUSD = parseFloat(priceUSDStr);
 
         const rate = 15.0;
-        let priceGHC = priceUSD * rate;
+        let priceGHC = isNaN(priceUSD) ? 15 : priceUSD * rate;
 
-        const discountRate = 0.5 + (Math.floor(id.slice(-2)) % 30) / 100;
+        const discountRate = 0.5 + (parseInt(id.slice(-2), 10) % 30) / 100;
         let originalGHC = priceGHC / (1 - discountRate);
 
         let displayTitle = normTitle;
@@ -195,8 +197,8 @@ export const fetchCjProducts = createServerFn(
           if (override.originalPrice !== undefined) originalGHC = override.originalPrice;
         }
 
-        const rating = 4.3 + (Math.floor(id.slice(-3)) % 7) / 10;
-        const reviews = 50 + (Math.floor(id.slice(-4)) % 2500);
+        const rating = 4.3 + (parseInt(id.slice(-3), 10) % 7) / 10;
+        const reviews = 50 + (parseInt(id.slice(-4), 10) % 2500);
         const finalDiscount = Math.round(((originalGHC - priceGHC) / originalGHC) * 100);
         const badge = finalDiscount > 0 ? `-${finalDiscount}%` : "";
 
