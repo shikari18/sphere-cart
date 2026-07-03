@@ -32,17 +32,19 @@ function CategoriesPage() {
   const [active, setActive] = useState(categoryList[0].slug);
   const [search, setSearch] = useState("");
 
-  // Query products dynamically from CJ based on selected category & search input
-  const { data: products = [], isLoading } = useQuery({
-    queryKey: ["cj-category-products", active, search],
-    queryFn: () => fetchCjProducts({ 
-      category: active, 
-      search: search || undefined, 
-      size: 20 
-    }),
+  // Fetch all products once, then filter client-side by category
+  const { data: allProducts = [], isLoading } = useQuery({
+    queryKey: ["cj-all-products"],
+    queryFn: () => fetchCjProducts({ data: { size: 200 } }),
+    staleTime: 5 * 60 * 1000,
   });
 
-  const productsList = Array.isArray(products) ? products : [];
+  // Filter by active category and search term client-side
+  const productsList = (Array.isArray(allProducts) ? allProducts : []).filter((p: any) => {
+    const matchesCategory = p.category?.toLowerCase() === active.toLowerCase();
+    const matchesSearch = !search || p.title?.toLowerCase().includes(search.toLowerCase());
+    return matchesCategory && matchesSearch;
+  });
 
   return (
     <PhoneShell>

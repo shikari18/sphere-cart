@@ -95,8 +95,8 @@ function ProductSheet({
     : product.title;
   const displaySku = selectedVariant?.variantSku || (product as any).sku || "";
 
-  const rawPriceUSD = selectedVariant?.variantSellPrice || (product.price / 15.0);
-  const displayPrice = rawPriceUSD * 15.0;
+  // variantSellPrice is already in GHC — use it directly, fallback to product.price
+  const displayPrice = selectedVariant?.variantSellPrice ?? product.price;
   const discount = Math.round(((product.original - displayPrice) / product.original) * 100);
 
   const cartItem = items.find((i) => i.id === (selectedVariant ? `${product.id}-${selectedVariant.vid}` : product.id));

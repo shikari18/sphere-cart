@@ -270,7 +270,7 @@ export const fetchCjVariants = createServerFn({ method: "GET" })
           variantNameEn: variantName,
           variantImage: variantImage,
           variantSku: v.variantSku || v.sku || "",
-          variantSellPrice: variantPriceGHC / 15.0, // Server function returns USD variantSellPrice, which is converted in ProductSheet
+          variantSellPrice: variantPriceGHC, // already in GHC
         };
       });
     } catch (error) {

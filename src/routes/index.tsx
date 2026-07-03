@@ -227,8 +227,8 @@ function Home() {
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-6 pb-3">
         <div className="flex items-center gap-2.5">
-          <img src="/logo.png" alt="Dova" className="w-9 h-9 rounded-full object-cover shadow-[var(--shadow-soft)]" />
-          <span className="text-xl font-extrabold tracking-tight">Dova</span>
+          <img src="/logo.png" alt="MB Shop" className="w-9 h-9 rounded-full object-cover shadow-[var(--shadow-soft)]" />
+          <span className="text-xl font-extrabold tracking-tight">MB Shop</span>
         </div>
         <button aria-label="Notifications" className="relative w-10 h-10 flex items-center justify-center rounded-full hover:bg-black/5 transition">
           <Bell className="w-5 h-5 text-foreground/80" />
