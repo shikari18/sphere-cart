@@ -1,7 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Bell, Search, Flame, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { PhoneShell } from "@/components/PhoneShell";
 import { BottomNav } from "@/components/BottomNav";
 import { ProductCard, FloatingCart } from "@/components/ProductCard";
@@ -9,6 +8,16 @@ import { categoryList } from "@/data/products";
 import { fetchCjProducts } from "@/lib/cj-api";
 
 export const Route = createFileRoute("/")({
+  // Server-side loader: fetches CJ products before the page renders
+  loader: async () => {
+    try {
+      const products = await fetchCjProducts({ size: 24 });
+      return { products: Array.isArray(products) ? products : [] };
+    } catch (e) {
+      console.error("[Home loader] Failed to fetch CJ products:", e);
+      return { products: [] };
+    }
+  },
   component: Home,
 });
 
@@ -175,22 +184,19 @@ function ProductCardSkeleton() {
 
 function Home() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
 
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedSearch(searchQuery);
-    }, 500);
-    return () => clearTimeout(handler);
-  }, [searchQuery]);
+  // Products are loaded server-side via the route loader above
+  const { products: loaderProducts } = Route.useLoaderData();
 
-  // Load products dynamically from CJ API
-  const { data: products = [], isLoading } = useQuery({
-    queryKey: ["cj-products", debouncedSearch],
-    queryFn: () => fetchCjProducts({ search: debouncedSearch, size: 24 }),
-  });
+  // Filter loaded products when user searches client-side
+  const productsList = searchQuery
+    ? loaderProducts.filter((p: any) =>
+        p.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.sku?.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : loaderProducts;
 
-  const productsList = Array.isArray(products) ? products : [];
+  const isLoading = false;
 
   return (
     <PhoneShell>
