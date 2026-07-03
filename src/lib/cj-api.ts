@@ -89,13 +89,69 @@ function autoCategorize(title: string): string {
 
 // Helper to normalise a CJ product item from any endpoint into the standard shape
 function normalizeCjItem(item: any, payloadCategory?: string) {
-  // myProduct/query uses: productId, nameEn, bigImage, sku
-  // product/list uses: pid, productNameEn, productImage, productSku
   const id = item.productId || item.pid || item.id;
   const title = item.nameEn || item.productNameEn || item.name || "Dova Product";
   const image = item.bigImage || item.productImage || item.mainImage || "";
   const sku = item.sku || item.productSku || "";
   return { id, title, image, sku, rawItem: item, category: payloadCategory || autoCategorize(title) };
+}
+
+// ── Firestore helpers (server-side only) ─────────────────────────────────────
+
+async function getFirestoreAdmin() {
+  // Use Firebase client SDK on server via dynamic import
+  const { initializeApp, getApps } = await import("firebase/app");
+  const { getFirestore, collection, getDocs, doc, setDoc, getDoc } = await import("firebase/firestore");
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBoUraz3l9P2VG8r4XvcE-zkylRqJDXoV0",
+    authDomain: "chat-ec8b1.firebaseapp.com",
+    projectId: "chat-ec8b1",
+    storageBucket: "chat-ec8b1.firebasestorage.app",
+    messagingSenderId: "841415038703",
+    appId: "1:841415038703:web:e449b9ba7b40bd41972d1a",
+  };
+
+  const app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  return { db, collection, getDocs, doc, setDoc, getDoc };
+}
+
+async function getRemovedProductIds(): Promise<Set<string>> {
+  try {
+    const { db, doc, getDoc } = await getFirestoreAdmin();
+    const snap = await getDoc(doc(db, "removed_products", "list"));
+    if (!snap.exists()) return new Set();
+    const data = snap.data();
+    return new Set<string>((data.ids as string[]) || []);
+  } catch {
+    return new Set();
+  }
+}
+
+async function getPriceOverrides(): Promise<Record<string, number>> {
+  try {
+    const { db, collection, getDocs } = await getFirestoreAdmin();
+    const snap = await getDocs(collection(db, "product_overrides"));
+    const overrides: Record<string, number> = {};
+    snap.forEach((d) => {
+      const data = d.data();
+      if (data.price !== undefined) overrides[d.id] = data.price;
+    });
+    return overrides;
+  } catch {
+    return {};
+  }
+}
+
+async function getBotProductsList(): Promise<any[]> {
+  try {
+    const { db, collection, getDocs } = await getFirestoreAdmin();
+    const snap = await getDocs(collection(db, "bot_products"));
+    return snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+  } catch {
+    return [];
+  }
 }
 
 // Server function to fetch products from CJ Dropshipping
@@ -107,6 +163,13 @@ export const fetchCjProducts = createServerFn({ method: "GET" })
     const pageNum = payload.page || 1;
     const pageSize = payload.size || 24;
     const keyWord = (payload.search || payload.category || "").toLowerCase();
+
+    // Load Firestore data in parallel
+    const [removedIds, firestorePriceOverrides, botProducts] = await Promise.all([
+      getRemovedProductIds(),
+      getPriceOverrides(),
+      getBotProductsList(),
+    ]);
 
     try {
       console.log("[fetchCjProducts] payload:", payload);
@@ -134,45 +197,48 @@ export const fetchCjProducts = createServerFn({ method: "GET" })
         });
       }
 
-      // Paginate
-      const start = (pageNum - 1) * pageSize;
-      rawList = rawList.slice(start, start + pageSize);
-      console.log("[fetchCjProducts] Final count:", rawList.length);
-
-      return rawList.map((item: any) => {
-        const norm = normalizeCjItem(item, payload.category);
-        // Ensure id is always a string so .slice() never throws
+      // Helper to shape a raw item into the final product format
+      const shapeProduct = (item: any, isBot = false) => {
+        const norm = normalizeCjItem(item, isBot ? (item.category || undefined) : payload.category);
         const id = String(norm.id);
         const { title: normTitle, image: normImage, sku: normSku, category: normCat } = norm;
 
-        // Check overrides
-        const override = productOverrides[id] || productOverrides[normSku];
+        // Check static overrides (from product-overrides.ts)
+        const staticOverride = productOverrides[id] || productOverrides[normSku];
 
         // Handle price ranges like "25.89-62.65" — take lowest price
-        const rawSellPrice = item.sellPrice || "10.0";
+        const rawSellPrice = isBot ? item.price : (item.sellPrice || "10.0");
         const priceUSDStr = rawSellPrice.toString().split("-")[0].trim();
         const priceUSD = parseFloat(priceUSDStr);
 
-        const rate = 15.0;        // USD → GHC conversion
-        const markup = 1.4;       // 40% profit margin above cost
+        const rate = 15.0;
+        const markup = 1.4;
         const costGHC = isNaN(priceUSD) ? 15 : priceUSD * rate;
-        let priceGHC = parseFloat((costGHC * markup).toFixed(2));   // your selling price
-        let originalGHC = parseFloat((priceGHC * 2).toFixed(2));    // show as 50% off deal
+        let priceGHC = isBot
+          ? parseFloat(String(item.price || costGHC * 1.15))
+          : parseFloat((costGHC * markup).toFixed(2));
+        let originalGHC = isBot
+          ? parseFloat(String(item.original || priceGHC * 2))
+          : parseFloat((priceGHC * 2).toFixed(2));
 
-        let displayTitle = normTitle;
-        let displayImage = normImage;
+        let displayTitle = isBot ? (item.title || normTitle) : normTitle;
+        let displayImage = isBot ? (item.image || normImage) : normImage;
 
-        if (override) {
-          if (override.title) displayTitle = override.title;
-          if (override.image) displayImage = override.image;
-          if (override.price !== undefined) priceGHC = override.price;
-          if (override.originalPrice !== undefined) originalGHC = override.originalPrice;
+        if (staticOverride) {
+          if (staticOverride.title) displayTitle = staticOverride.title;
+          if (staticOverride.image) displayImage = staticOverride.image;
+          if (staticOverride.price !== undefined) priceGHC = staticOverride.price;
+          if (staticOverride.originalPrice !== undefined) originalGHC = staticOverride.originalPrice;
+        }
+
+        // Apply Firestore price overrides (admin-set prices take highest precedence)
+        if (firestorePriceOverrides[id] !== undefined) {
+          priceGHC = firestorePriceOverrides[id];
         }
 
         const rating = 4.3 + (parseInt(id.slice(-3), 10) % 7) / 10;
         const reviews = 50 + (parseInt(id.slice(-4), 10) % 2500);
         const finalDiscount = Math.round(((originalGHC - priceGHC) / originalGHC) * 100);
-        // Vary the badge: 20%, 25%, 30%... up to 70% based on product id
         const discountSteps = [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70];
         const discountIdx = parseInt(id.slice(-2), 16) % discountSteps.length;
         const badge = `-${discountSteps[discountIdx]}%`;
@@ -187,11 +253,38 @@ export const fetchCjProducts = createServerFn({ method: "GET" })
           rating: parseFloat(rating.toFixed(1)),
           reviews,
           badge,
-          category: normCat,
+          category: isBot ? (item.category || normCat) : normCat,
           topRated: rating > 4.7,
-          sku: normSku,
+          sku: isBot ? (item.sku || normSku) : normSku,
         };
+      };
+
+      // Filter removed products
+      rawList = rawList.filter((item: any) => {
+        const id = String(item.productId || item.pid || item.id);
+        return !removedIds.has(id);
       });
+
+      // Paginate My Products
+      const start = (pageNum - 1) * pageSize;
+      const paginatedRaw = rawList.slice(start, start + pageSize);
+      console.log("[fetchCjProducts] Final count:", paginatedRaw.length);
+
+      const myProducts = paginatedRaw.map((item) => shapeProduct(item, false));
+
+      // Merge bot products (filter removed, apply keyword filter)
+      const filteredBotProducts = botProducts
+        .filter((bp) => !removedIds.has(String(bp.id)))
+        .filter((bp) => {
+          if (!keyWord) return true;
+          const t = (bp.title || "").toLowerCase();
+          const matchesKeyword = t.includes(keyWord);
+          const matchesCategory = !payload.category || (bp.category || "").toLowerCase() === payload.category.toLowerCase();
+          return matchesKeyword && matchesCategory;
+        })
+        .map((bp) => shapeProduct(bp, true));
+
+      return [...myProducts, ...filteredBotProducts];
     } catch (error) {
       console.error("CJ Fetch Products Error:", error);
       throw error;
@@ -244,7 +337,6 @@ export const fetchCjVariants = createServerFn({ method: "GET" })
 
       const variants = json.data || [];
       return variants.map((v: any) => {
-        // Check for variant level or product level overrides
         const override = productOverrides[v.vid] || productOverrides[v.variantSku] || productOverrides[v.pid];
 
         let variantName = v.variantNameEn || v.variantKey || "Default Variant";
@@ -253,11 +345,9 @@ export const fetchCjVariants = createServerFn({ method: "GET" })
         let variantPriceGHC = variantPriceUSD * 15.0;
 
         if (override) {
-          // If product level override has a custom title but variant name is generic, we can merge
           if (override.title && (variantName === "Default Variant" || !variantName)) {
             variantName = override.title;
           }
-          // We can override variant image if a specific variant override exists
           const specificVarOverride = productOverrides[v.vid] || productOverrides[v.variantSku];
           if (specificVarOverride?.image) {
             variantImage = specificVarOverride.image;
@@ -273,7 +363,7 @@ export const fetchCjVariants = createServerFn({ method: "GET" })
           variantNameEn: variantName,
           variantImage: variantImage,
           variantSku: v.variantSku || v.sku || "",
-          variantSellPrice: variantPriceGHC, // already in GHC
+          variantSellPrice: variantPriceGHC,
         };
       });
     } catch (error) {
@@ -304,7 +394,6 @@ export const createCjOrder = createServerFn({ method: "POST" })
     const payload = data;
     const token = await getAccessToken();
     
-    // Generate a unique order number for CJ
     const orderNumber = `DOVA-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
     const requestBody = {
@@ -318,7 +407,7 @@ export const createCjOrder = createServerFn({ method: "POST" })
       shippingZip: payload.zip,
       shippingPhone: payload.phone,
       email: payload.email,
-      payType: 3, // Create order only (unpaid status in CJ)
+      payType: 3,
       products: payload.products.map((p, index) => ({
         vid: p.vid,
         quantity: p.quantity,
@@ -351,4 +440,181 @@ export const createCjOrder = createServerFn({ method: "POST" })
       console.error("CJ Create Order Error:", error);
       throw error;
     }
+  });
+
+// ── Admin: Firestore write helpers ───────────────────────────────────────────
+
+/** Remove a product — saves its ID to Firestore removed_products/list */
+export const adminRemoveProduct = createServerFn({ method: "POST" })
+  .handler(async ({ data }: { data: { productId: string } }) => {
+    const { db, doc, getDoc, setDoc } = await getFirestoreAdmin();
+    const ref = doc(db, "removed_products", "list");
+    const snap = await getDoc(ref);
+    const existing: string[] = snap.exists() ? (snap.data().ids || []) : [];
+    if (!existing.includes(data.productId)) {
+      await setDoc(ref, { ids: [...existing, data.productId] }, { merge: true });
+    }
+    return { success: true };
+  });
+
+/** Set a price override for a product in Firestore */
+export const adminSetProductPrice = createServerFn({ method: "POST" })
+  .handler(async ({ data }: { data: { productId: string; price: number } }) => {
+    const { db, doc, setDoc } = await getFirestoreAdmin();
+    await setDoc(doc(db, "product_overrides", data.productId), { price: data.price }, { merge: true });
+    return { success: true };
+  });
+
+/** Remove a user document from Firestore (soft delete — marks as removed) */
+export const adminRemoveUser = createServerFn({ method: "POST" })
+  .handler(async ({ data }: { data: { uid: string } }) => {
+    const { db, doc, setDoc } = await getFirestoreAdmin();
+    await setDoc(doc(db, "users", data.uid), { removed: true, removedAt: new Date().toISOString() }, { merge: true });
+    return { success: true };
+  });
+
+/** Fetch all users from Firestore */
+export const adminGetUsers = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { db, collection, getDocs } = await getFirestoreAdmin();
+    const snap = await getDocs(collection(db, "users"));
+    return snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
+  });
+
+/** Fetch stats: user count, order count */
+export const adminGetStats = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { db, collection, getDocs } = await getFirestoreAdmin();
+    const [usersSnap, ordersSnap, botSnap] = await Promise.all([
+      getDocs(collection(db, "users")),
+      getDocs(collection(db, "orders")),
+      getDocs(collection(db, "bot_products")),
+    ]);
+    return {
+      totalUsers: usersSnap.size,
+      totalOrders: ordersSnap.size,
+      totalBotProducts: botSnap.size,
+    };
+  });
+
+/** Get bot status from Firestore */
+export const adminGetBotStatus = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { db, doc, getDoc } = await getFirestoreAdmin();
+    const snap = await getDoc(doc(db, "bot_status", "latest"));
+    if (!snap.exists()) return { lastRun: null, addedToday: 0 };
+    return snap.data() as { lastRun: string; addedToday: number };
+  });
+
+/** Get all products from Firestore bot_products collection */
+export const getBotProducts = createServerFn({ method: "GET" })
+  .handler(async () => {
+    return await getBotProductsList();
+  });
+
+/** Get all CJ My Products (for admin panel listing) */
+export const adminGetCjProducts = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const token = await getAccessToken();
+    const [removedIds, firestorePriceOverrides] = await Promise.all([
+      getRemovedProductIds(),
+      getPriceOverrides(),
+    ]);
+
+    const myProdRes = await fetch(
+      `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=1&pageSize=200`,
+      { headers: { "CJ-Access-Token": token } }
+    );
+    const myProdJson = await myProdRes.json();
+    const rawList: any[] = myProdJson.code === 200 ? (myProdJson.data?.content || []) : [];
+
+    return rawList.map((item: any) => {
+      const norm = normalizeCjItem(item);
+      const id = String(norm.id);
+      const rawSellPrice = item.sellPrice || "10.0";
+      const priceUSDStr = rawSellPrice.toString().split("-")[0].trim();
+      const priceUSD = parseFloat(priceUSDStr);
+      const rate = 15.0;
+      const markup = 1.4;
+      const costGHC = isNaN(priceUSD) ? 15 : priceUSD * rate;
+      const basePrice = parseFloat((costGHC * markup).toFixed(2));
+      const currentPrice = firestorePriceOverrides[id] !== undefined ? firestorePriceOverrides[id] : basePrice;
+
+      return {
+        id,
+        title: norm.title,
+        image: norm.image,
+        sku: norm.sku,
+        category: norm.category,
+        basePrice,
+        currentPrice,
+        removed: removedIds.has(id),
+      };
+    });
+  });
+
+// ── Auto-Bot: fetches products from CJ catalog and saves to Firestore ────────
+
+export const runCjAutoBot = createServerFn({ method: "POST" })
+  .handler(async () => {
+    const token = await getAccessToken();
+
+    // Fetch 70 products from the CJ general catalog (listV2 endpoint)
+    const catalogRes = await fetch(
+      `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=1&pageSize=70`,
+      { headers: { "CJ-Access-Token": token } }
+    );
+    const catalogJson = await catalogRes.json();
+
+    if (catalogJson.code !== 200) {
+      throw new Error(catalogJson.message || "Failed to fetch CJ catalog products");
+    }
+
+    const items: any[] = catalogJson.data?.list || catalogJson.data?.content || [];
+
+    const { db, doc, setDoc, collection, getDocs } = await getFirestoreAdmin();
+
+    // Get existing bot product IDs to avoid duplicates
+    const existingSnap = await getDocs(collection(db, "bot_products"));
+    const existingIds = new Set(existingSnap.docs.map((d) => d.id));
+
+    let added = 0;
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+
+    for (const item of items) {
+      const norm = normalizeCjItem(item);
+      const id = String(norm.id);
+      if (!id || existingIds.has(id)) continue;
+
+      // Parse sell price, convert USD → GHC (×15), add 15% markup
+      const rawSellPrice = item.sellPrice || item.price || "10.0";
+      const priceUSDStr = rawSellPrice.toString().split("-")[0].trim();
+      const priceUSD = parseFloat(priceUSDStr);
+      const costGHC = isNaN(priceUSD) ? 15 : priceUSD * 15;
+      const priceGHC = parseFloat((costGHC * 1.15).toFixed(2));
+      const originalGHC = parseFloat((priceGHC * 2).toFixed(2));
+
+      await setDoc(doc(db, "bot_products", id), {
+        id,
+        title: norm.title,
+        image: norm.image,
+        price: priceGHC,
+        original: originalGHC,
+        category: norm.category,
+        sku: norm.sku,
+        addedAt: now.toISOString(),
+        addedDate: todayStr,
+      });
+
+      added++;
+    }
+
+    // Update bot status
+    await setDoc(doc(db, "bot_status", "latest"), {
+      lastRun: now.toISOString(),
+      addedToday: added,
+    });
+
+    return { added, timestamp: now.toISOString() };
   });
