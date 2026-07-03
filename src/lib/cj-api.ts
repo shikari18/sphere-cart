@@ -42,47 +42,109 @@ export type CJVariant = {
   variantSellPrice: number;
 };
 
+// Helper to automatically categorize products based on their title keyword
+function autoCategorize(title: string): string {
+  const t = title.toLowerCase();
+  if (t.includes("charger") || t.includes("headset") || t.includes("earbud") || t.includes("phone") || t.includes("bluetooth") || t.includes("wireless") || t.includes("electronics") || t.includes("device") || t.includes("speaker")) {
+    return "Electronics";
+  }
+  if (t.includes("dress") || t.includes("shirt") || t.includes("hoodie") || t.includes("t-shirt") || t.includes("jacket") || t.includes("clothing") || t.includes("fashion") || t.includes("necklace") || t.includes("sunglasses") || t.includes("ring")) {
+    return "Fashion";
+  }
+  if (t.includes("makeup") || t.includes("brush") || t.includes("palette") || t.includes("beauty") || t.includes("serum") || t.includes("cosmetic") || t.includes("skincare")) {
+    return "Beauty";
+  }
+  if (t.includes("lamp") || t.includes("light") || t.includes("vase") || t.includes("decor") || t.includes("home") || t.includes("desk") || t.includes("curtain")) {
+    return "Home";
+  }
+  if (t.includes("shoes") || t.includes("sneakers") || t.includes("slides") || t.includes("sandals") || t.includes("runners")) {
+    return "Shoes";
+  }
+  if (t.includes("bag") || t.includes("crossbody") || t.includes("backpack") || t.includes("leather")) {
+    return "Bags";
+  }
+  if (t.includes("watch") || t.includes("smartwatch") || t.includes("fitness")) {
+    return "Watches";
+  }
+  if (t.includes("gaming") || t.includes("controller") || t.includes("console") || t.includes("playstation") || t.includes("xbox") || t.includes("toy") || t.includes("dice")) {
+    return "Gaming";
+  }
+  
+  // Default fallback categories
+  const categories = ["Electronics", "Fashion", "Beauty", "Home", "Shoes", "Bags", "Watches", "Gaming"];
+  const charSum = title.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return categories[charSum % categories.length];
+}
+
 // Server function to fetch products from CJ Dropshipping
 export const fetchCjProducts = createServerFn(
   "GET",
   async (payload: { category?: string; search?: string; page?: number; size?: number } = {}) => {
     const token = await getAccessToken();
     const pageNum = payload.page || 1;
-    const pageSize = payload.size || 20;
-    const keyWord = payload.search || payload.category || "";
+    const pageSize = payload.size || 24;
+    const keyWord = (payload.search || payload.category || "").toLowerCase();
     
-    let url = `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${pageNum}&pageSize=${pageSize}`;
-    if (keyWord) {
-      url += `&keyWord=${encodeURIComponent(keyWord)}`;
-    }
-
     try {
-      const response = await fetch(url, {
+      // 1. Fetch from My Products first
+      const myProductUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=${pageNum}&pageSize=100`;
+      const response = await fetch(myProductUrl, {
         headers: { "CJ-Access-Token": token },
       });
       const json = await response.json();
       
-      if (json.code !== 200) {
-        throw new Error(json.message || "Failed to fetch products from CJ API");
+      let list: any[] = [];
+      if (json.code === 200 && json.data?.content && json.data.content.length > 0) {
+        list = json.data.content;
+      }
+      
+      // 2. Fallback to listV2 general catalog if My Products is empty
+      if (list.length === 0) {
+        const generalUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${pageNum}&pageSize=${pageSize}${keyWord ? `&keyWord=${encodeURIComponent(keyWord)}` : ""}`;
+        const genResponse = await fetch(generalUrl, {
+          headers: { "CJ-Access-Token": token },
+        });
+        const genJson = await genResponse.json();
+        if (genJson.code === 200) {
+          const dataObj = genJson.data;
+          list = Array.isArray(dataObj) 
+            ? (dataObj[0]?.list || []) 
+            : (dataObj?.list || []);
+        }
+      } else {
+        // If we are displaying My Products, filter them by keyword/category locally
+        list = list.filter((item: any) => {
+          const title = (item.nameEn || item.name || "").toLowerCase();
+          const sku = (item.sku || "").toLowerCase();
+          const itemCat = autoCategorize(item.nameEn || item.name || "").toLowerCase();
+          
+          const matchesKeyword = !keyWord || title.includes(keyWord) || sku.includes(keyWord);
+          const matchesCategory = !payload.category || itemCat === payload.category.toLowerCase();
+          
+          return matchesKeyword && matchesCategory;
+        });
+        
+        // Paginate the filtered list locally
+        const start = (pageNum - 1) * pageSize;
+        list = list.slice(start, start + pageSize);
       }
 
-      // Handle the nested structure: json.data[0].list
-      const dataObj = json.data;
-      const list = Array.isArray(dataObj) 
-        ? (dataObj[0]?.list || []) 
-        : (dataObj?.list || []);
-
       return list.map((item: any) => {
+        const id = item.productId || item.id;
         // Check if there is a custom override for this product ID or SKU
-        const override = productOverrides[item.id] || productOverrides[item.sku];
+        const override = productOverrides[id] || productOverrides[item.sku];
 
+        // Handle price ranges (e.g. "25.89-62.65")
+        const rawSellPrice = item.sellPrice || "10.0";
+        const priceUSDStr = rawSellPrice.toString().split("-")[0].trim();
+        const priceUSD = parseFloat(priceUSDStr);
+        
         // CJ prices are USD. Convert to GHC (₵) with a standard rate of 15
         const rate = 15.0;
-        const priceUSD = parseFloat(item.sellPrice || "10.0");
         let priceGHC = priceUSD * rate;
         
         // Generate a random mockup discount (e.g. 55% to 78%)
-        const discountRate = 0.5 + (Math.floor(item.id.slice(-2)) % 30) / 100;
+        const discountRate = 0.5 + (Math.floor(id.slice(-2)) % 30) / 100;
         let originalGHC = priceGHC / (1 - discountRate);
 
         // Apply overrides if present
@@ -96,14 +158,14 @@ export const fetchCjProducts = createServerFn(
           if (override.originalPrice !== undefined) originalGHC = override.originalPrice;
         }
 
-        const rating = 4.3 + (Math.floor(item.id.slice(-3)) % 7) / 10;
-        const reviews = 50 + (Math.floor(item.id.slice(-4)) % 2500);
+        const rating = 4.3 + (Math.floor(id.slice(-3)) % 7) / 10;
+        const reviews = 50 + (Math.floor(id.slice(-4)) % 2500);
         
         const finalDiscount = Math.round(((originalGHC - priceGHC) / originalGHC) * 100);
         const badge = finalDiscount > 0 ? `-${finalDiscount}%` : "";
 
         return {
-          id: item.id,
+          id: id,
           title: displayTitle,
           image: displayImage,
           price: parseFloat(priceGHC.toFixed(2)),
@@ -112,7 +174,7 @@ export const fetchCjProducts = createServerFn(
           rating: parseFloat(rating.toFixed(1)),
           reviews,
           badge,
-          category: payload.category || "General",
+          category: payload.category || autoCategorize(item.nameEn || item.name || ""),
           topRated: rating > 4.7,
           sku: item.sku,
         };
