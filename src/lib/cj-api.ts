@@ -1,7 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { productOverrides } from "@/data/product-overrides";
 
-const apiKey = "CJ5292255@api@b5fe6ac793314066801c38bc47fcab0c";
+// Multiple CJ API keys — rotates automatically when one hits daily limit
+const apiKeys = [
+  "CJ5292255@api@b5fe6ac793314066801c38bc47fcab0c",
+  "CJ5292255@CJ:eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiI0MTQwOCIsInR5cGUiOiJBQ0NFU1NfVE9LRU4iLCJzdWIiOiJtNnViRnRCamYraDhqaEdNeklGeXdLMVh6NWJHL0dvYUoxSXAxVlpaSGZhQklvSDl5d3VQaWgraGxERWl1VnZhc05jakVvRmFsYXZBdWF2TUs4TDByRGdZZ2FCTlFNK0YvOEplQTdmeTZZamgzY3o1ejdMdmZMa2hNOHQzZzUvU0FOaEpTbzlVa05Gb05GcG1CZDdSdXI1bkdxTXBVcHJnMzcyVTFQRFFnMStuQ2F4WFpRTk9QaVh0VmlLWTNxclZpTmFWYW9qdUpXTnJtd0UxUXphN2NTeDFlclNWZmRNQStpUVNHSnNCZzV3OXdKZVlHd0w3N2Q4WlV0T1c4Sy9CaUtpeHkrZTFPMUVvOWlGdjdmeGdNZk9LSzhtN2hUTFlrVVord2t4NkV0MD0iLCJpYXQiOjE3ODMxMTE5MzJ9.27OfYrjyhGlyGq2BVvL4TiO4xx8IxuHbbmCaydaSjo8",
+  "CJ5292255@CJ:eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiI0MTQwOCIsInR5cGUiOiJBQ0NFU1NfVE9LRU4iLCJzdWIiOiJtNnViRnRCamYraDhqaEdNeklGeXdLMVh6NWJHL0dvYUoxSXAxVlpaSGZhQklvSDl5d3VQaWgraGxERWl1VnZhc05jakVvRmFsYXZBdWF2TUs4TDByQWN6M0pxVUwyU3p4Uk1xaXB3NitkMEFhckNHbE9zZTljZDlLa2lKZXdZaEFOaEpTbzlVa05Gb05GcG1CZDdSdXI1bkdxTXBVcHJnMzcyVTFQRFFnMStuQ2F4WFpRTk9QaVh0VmlLWTNxclZpTmFWYW9qdUpXTnJtd0UxUXphN2NTeDFlclNWZmRNQStpUVNHSnNCZzV3OXdKZVlHd0w3N2Q4WlV0T1c4Sy9CaUtpeHkrZTFPMUVvOWlGdjdmeGdNZk9LSzhtN2hUTFlrVVord2t4NkV0MD0iLCJpYXQiOjE3ODMxMTE5NTV9.xo1D4ZFhc_xGP6YT--Fi5k6WBfs2DyYy-VV4G9H6PIk",
+  "CJ5292255@CJ:eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiI0MTQwOCIsInR5cGUiOiJBQ0NFU1NfVE9LRU4iLCJzdWIiOiJtNnViRnRCamYraDhqaEdNeklGeXdLMVh6NWJHL0dvYUoxSXAxVlpaSGZhQklvSDl5d3VQaWgraGxERWl1VnZhc05jakVvRmFsYXZBdWF2TUs4TDByRk5pa1VvcGVab2c5RlBJMnRjZWRUTUFhckNHbE9zZTljZDlLa2lKZXdZaEFOaEpTbzlVa05Gb05GcG1CZDdSdXI1bkdxTXBVcHJnMzcyVTFQRFFnMStuQ2F4WFpRTk9QaVh0VmlLWTNxclZpTmFWYW9qdUpXTnJtd0UxUXphN2NTeDFlclNWZmRNQStpUVNHSnNCZzV3OXdKZVlHd0w3N2Q4WlV0T1c4Sy9CaUtpeHkrZTFPMUVvOWlGdjdmeGdNZk9LSzhtN2hUTFlrVVord2t4NkV0MD0iLCJpYXQiOjE3ODMxMTE5OTV9.eQgd1y8HxTRgvwmsiQTEGt-ZEP63roipuyBfVmSQONA",
+];
 
 // Local JSON database helpers — use dynamic imports to prevent bundling into browser
 async function readLocalProducts(): Promise<any[]> {
@@ -12,7 +18,6 @@ async function readLocalProducts(): Promise<any[]> {
     const data = await fs.readFile(dbPath, "utf-8");
     return JSON.parse(data);
   } catch (error) {
-    console.error("Failed to read local JSON database, returning empty array:", error);
     return [];
   }
 }
@@ -24,24 +29,22 @@ async function writeLocalProducts(products: any[]) {
   await fs.writeFile(dbPath, JSON.stringify(products, null, 2), "utf-8");
 }
 
-// Internal server-side helper to authenticate — no caching so product changes reflect immediately
-async function getAccessToken(): Promise<string> {
-  try {
-    const response = await fetch("https://developers.cjdropshipping.com/api2.0/v1/authentication/getAccessToken", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiKey }),
-    });
-    
-    const json = await response.json();
-    if (json.code === 200 && json.data?.accessToken) {
-      return json.data.accessToken;
-    }
-    throw new Error(json.message || "Failed to authenticate with CJ Dropshipping API");
-  } catch (error) {
-    console.error("CJ Auth Error:", error);
-    throw error;
+
+  for (const key of apiKeys) {
+    try {
+      const response = await fetch("https://developers.cjdropshipping.com/api2.0/v1/authentication/getAccessToken", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: key }),
+      });
+      const json = await response.json();
+      if (json.code === 200 && json.data?.accessToken) {
+        console.log("[CJ Auth] Authenticated successfully");
+        return json.data.accessToken;
+      }
+    } catch {}
   }
+  throw new Error("All CJ API keys exhausted. Please add new keys.");
 }
 
 export type CJVariant = {
