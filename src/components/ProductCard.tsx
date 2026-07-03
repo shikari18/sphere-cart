@@ -95,8 +95,9 @@ function ProductSheet({
     : product.title;
   const displaySku = selectedVariant?.variantSku || (product as any).sku || "";
 
-  // variantSellPrice is already in GHC — use it directly, fallback to product.price
-  const displayPrice = selectedVariant?.variantSellPrice ?? product.price;
+  // Use product.price consistently — this matches exactly what the product card shows.
+  // Variant selection changes the image/title/sku but NOT the price (price is set at product level).
+  const displayPrice = product.price;
   const discount = Math.round(((product.original - displayPrice) / product.original) * 100);
 
   const cartItem = items.find((i) => i.id === (selectedVariant ? `${product.id}-${selectedVariant.vid}` : product.id));
