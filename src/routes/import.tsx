@@ -32,12 +32,12 @@ function ImportPage() {
   // Query global CJ catalog (with bypassLocal: true)
   const { data: cjProducts = [], isLoading: isLoadingCatalog } = useQuery({
     queryKey: ["cj-global-catalog", debouncedSearch],
-    queryFn: () => fetchCjProducts({ search: debouncedSearch || "dress", size: 20, bypassLocal: true }),
+    queryFn: () => fetchCjProducts({ data: { search: debouncedSearch || "dress", size: 20, bypassLocal: true } }),
   });
 
   // Import Mutation
   const importMutation = useMutation({
-    mutationFn: (product: any) => importCjProduct({ product }),
+    mutationFn: (product: any) => importCjProduct({ data: { product } }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["imported-products"] });
       queryClient.invalidateQueries({ queryKey: ["cj-products"] }); // Refresh storefront products
@@ -51,7 +51,7 @@ function ImportPage() {
 
   // Remove Mutation
   const removeMutation = useMutation({
-    mutationFn: (pid: string) => removeImportedProduct({ pid }),
+    mutationFn: (pid: string) => removeImportedProduct({ data: { pid } }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["imported-products"] });
       queryClient.invalidateQueries({ queryKey: ["cj-products"] }); // Refresh storefront products

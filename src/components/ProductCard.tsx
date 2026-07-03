@@ -22,7 +22,7 @@ function ProductSheet({
   // Fetch variants from CJ Dropshipping API
   const { data: variants = [], isLoading } = useQuery({
     queryKey: ["cj-variants", product.id],
-    queryFn: () => fetchCjVariants({ pid: product.id }),
+    queryFn: () => fetchCjVariants({ data: { pid: product.id } }),
     enabled: !!product.id,
   });
 

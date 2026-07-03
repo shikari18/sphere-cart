@@ -110,17 +110,19 @@ function normalizeCjItem(item: any, payloadCategory?: string) {
 
 // Server function to fetch products from CJ Dropshipping
 // Priority: 1. Local JSON database  2. CJ My Products (auto-synced)  3. General catalog fallback
-export const fetchCjProducts = createServerFn(
-  "GET",
-  async (payload: { category?: string; search?: string; page?: number; size?: number; bypassLocal?: boolean } = {}) => {
+export const fetchCjProducts = createServerFn({ method: "GET" })
+  .handler(async ({ data }: { data?: { category?: string; search?: string; page?: number; size?: number; bypassLocal?: boolean } }) => {
+    const payload = data || {};
     const token = await getAccessToken();
     const pageNum = payload.page || 1;
     const pageSize = payload.size || 24;
     const keyWord = (payload.search || payload.category || "").toLowerCase();
 
     try {
+      console.log("[fetchCjProducts] payload:", payload);
       // ── 1. Local JSON database (explicitly imported via Import Panel) ─────────
       let localList = payload.bypassLocal ? [] : await readLocalProducts();
+      console.log("[fetchCjProducts] Read local products count:", localList.length);
 
       if (localList.length > 0) {
         localList = localList.filter((item: any) => {
@@ -131,30 +133,37 @@ export const fetchCjProducts = createServerFn(
           const matchesCategory = !payload.category || itemCat === payload.category.toLowerCase();
           return matchesKeyword && matchesCategory;
         });
+        console.log("[fetchCjProducts] Local products filtered count:", localList.length);
         const start = (pageNum - 1) * pageSize;
         return localList.slice(start, start + pageSize);
       }
 
       // ── 2. CJ My Products — auto-synced live from CJ dashboard ───────────────
       let rawList: any[] = [];
+      const myProductUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=1&pageSize=200`;
+      console.log("[fetchCjProducts] Fetching CJ myProduct list from:", myProductUrl);
       const myProdRes = await fetch(
-        `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=1&pageSize=200`,
+        myProductUrl,
         { headers: { "CJ-Access-Token": token } }
       );
       const myProdJson = await myProdRes.json();
+      console.log("[fetchCjProducts] CJ myProduct response code:", myProdJson.code, "message:", myProdJson.message);
       if (myProdJson.code === 200 && myProdJson.data?.content?.length > 0) {
         rawList = myProdJson.data.content;
       }
+      console.log("[fetchCjProducts] CJ myProduct live count:", rawList.length);
 
       // ── 3. General catalog fallback if My Products is empty ───────────────────
       if (rawList.length === 0) {
         const genUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${pageNum}&pageSize=${pageSize}${keyWord ? `&keyWord=${encodeURIComponent(keyWord)}` : ""}`;
+        console.log("[fetchCjProducts] Fallback: fetching general catalog from:", genUrl);
         const genRes = await fetch(genUrl, { headers: { "CJ-Access-Token": token } });
         const genJson = await genRes.json();
         if (genJson.code === 200) {
           const d = genJson.data;
           rawList = Array.isArray(d) ? (d[0]?.list || []) : (d?.list || []);
         }
+        console.log("[fetchCjProducts] Fallback general catalog count:", rawList.length);
       } else {
         // Filter and paginate My Products
         rawList = rawList.filter((item: any) => {
@@ -163,6 +172,7 @@ export const fetchCjProducts = createServerFn(
           const matchesCategory = !payload.category || norm.category.toLowerCase() === payload.category.toLowerCase();
           return matchesKeyword && matchesCategory;
         });
+        console.log("[fetchCjProducts] Filtered myProduct count:", rawList.length);
         const start = (pageNum - 1) * pageSize;
         rawList = rawList.slice(start, start + pageSize);
       }
@@ -225,41 +235,37 @@ export const fetchCjProducts = createServerFn(
 );
 
 // Server function to fetch only imported products
-export const fetchImportedProducts = createServerFn(
-  "GET",
-  async () => {
+export const fetchImportedProducts = createServerFn({ method: "GET" })
+  .handler(async () => {
     return await readLocalProducts();
-  }
-);
+  });
 
 // Server function to import product into local JSON database
-export const importCjProduct = createServerFn(
-  "POST",
-  async (payload: { product: any }) => {
+export const importCjProduct = createServerFn({ method: "POST" })
+  .handler(async ({ data }: { data: { product: any } }) => {
+    const payload = data;
     const localProds = await readLocalProducts();
     if (!localProds.some((p: any) => p.id === payload.product.id)) {
       localProds.push(payload.product);
       await writeLocalProducts(localProds);
     }
     return { success: true };
-  }
-);
+  });
 
 // Server function to remove product from local JSON database
-export const removeImportedProduct = createServerFn(
-  "POST",
-  async (payload: { pid: string }) => {
+export const removeImportedProduct = createServerFn({ method: "POST" })
+  .handler(async ({ data }: { data: { pid: string } }) => {
+    const payload = data;
     let localProds = await readLocalProducts();
     localProds = localProds.filter((p: any) => p.id !== payload.pid);
     await writeLocalProducts(localProds);
     return { success: true };
-  }
-);
+  });
 
 // Server function to fetch product variants from CJ Dropshipping
-export const fetchCjVariants = createServerFn(
-  "GET",
-  async (payload: { pid: string }) => {
+export const fetchCjVariants = createServerFn({ method: "GET" })
+  .handler(async ({ data }: { data: { pid: string } }) => {
+    const payload = data;
     const token = await getAccessToken();
     try {
       const response = await fetch(`https://developers.cjdropshipping.com/api2.0/v1/product/variant/query?pid=${payload.pid}`, {
@@ -309,8 +315,7 @@ export const fetchCjVariants = createServerFn(
       console.error("CJ Fetch Variants Error:", error);
       throw error;
     }
-  }
-);
+  });
 
 export type CJOrderDetails = {
   customerName: string;
@@ -329,9 +334,9 @@ export type CJOrderDetails = {
 };
 
 // Server function to create order in CJ Dropshipping
-export const createCjOrder = createServerFn(
-  "POST",
-  async (payload: CJOrderDetails) => {
+export const createCjOrder = createServerFn({ method: "POST" })
+  .handler(async ({ data }: { data: CJOrderDetails }) => {
+    const payload = data;
     const token = await getAccessToken();
     
     // Generate a unique order number for CJ
@@ -381,5 +386,4 @@ export const createCjOrder = createServerFn(
       console.error("CJ Create Order Error:", error);
       throw error;
     }
-  }
-);
+  });

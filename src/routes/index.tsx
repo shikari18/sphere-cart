@@ -10,11 +10,13 @@ import { fetchCjProducts } from "@/lib/cj-api";
 export const Route = createFileRoute("/")({
   // Server-side loader: fetches CJ products before the page renders
   loader: async () => {
+    console.log("[Home Loader] Starting load...");
     try {
-      const products = await fetchCjProducts({ size: 24 });
+      const products = await fetchCjProducts({ data: { size: 24 } });
+      console.log("[Home Loader] Products fetched successfully. Count:", products?.length);
       return { products: Array.isArray(products) ? products : [] };
     } catch (e) {
-      console.error("[Home loader] Failed to fetch CJ products:", e);
+      console.error("[Home Loader] Error fetching products:", e);
       return { products: [] };
     }
   },

@@ -57,16 +57,18 @@ function CartPage() {
       });
 
       const response = await createCjOrder({
-        customerName: shipping.customerName,
-        email: shipping.email,
-        phone: shipping.phone,
-        countryCode: shipping.countryCode,
-        province: shipping.province,
-        city: shipping.city,
-        address: shipping.address,
-        address2: shipping.address2 || undefined,
-        zip: shipping.zip,
-        products: orderProducts,
+        data: {
+          customerName: shipping.customerName,
+          email: shipping.email,
+          phone: shipping.phone,
+          countryCode: shipping.countryCode,
+          province: shipping.province,
+          city: shipping.city,
+          address: shipping.address,
+          address2: shipping.address2 || undefined,
+          zip: shipping.zip,
+          products: orderProducts,
+        }
       });
 
       if (response.success) {
