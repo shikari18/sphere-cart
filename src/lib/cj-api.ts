@@ -581,7 +581,7 @@ export const fetchBotByCategory = createServerFn({ method: "POST" })
     const token = await getAccessToken();
     const { category, amount, customPrice } = data;
     const allItems: any[] = [];
-    const pageSize = Math.min(amount, 100);
+    const pageSize = 100; // max per page
     const pages = Math.ceil(amount / pageSize);
 
     for (let page = 1; page <= pages && allItems.length < amount; page++) {
@@ -597,8 +597,10 @@ export const fetchBotByCategory = createServerFn({ method: "POST" })
             allItems.push(...list);
             if (allItems.length >= amount) break;
           }
+        } else {
+          break; // no more pages
         }
-      } catch {}
+      } catch { break; }
     }
 
     const now = new Date();
@@ -611,6 +613,7 @@ export const fetchBotByCategory = createServerFn({ method: "POST" })
       const rawSellPrice = (item.sellPrice || item.nowPrice || "10.0").toString().split(" ")[0].split("-")[0].trim();
       const priceUSD = parseFloat(rawSellPrice) || 10;
       const costGHC = priceUSD * 15;
+      // Use custom price if specified, otherwise apply 20% markup
       const priceGHC = customPrice !== undefined ? customPrice : parseFloat((costGHC * 1.20).toFixed(2));
       const originalGHC = parseFloat((priceGHC * 2).toFixed(2));
       const discountSteps = [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70];

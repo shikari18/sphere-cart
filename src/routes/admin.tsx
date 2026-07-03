@@ -410,16 +410,21 @@ function parseIntent(msg: string) {
     : lower.includes("add") || lower.includes("import") || lower.includes("get") || lower.includes("fetch") ? "add"
     : "unknown";
   const category = CATEGORIES.find(c => lower.includes(c.toLowerCase()));
-  const amountMatch = msg.match(/\b(\d{1,4})\b/);
+
+  // Amount = first standalone number in the message (NOT preceded by ₵, $, cedis, price)
+  const amountMatch = msg.match(/(?<![₵$])\b(\d{1,4})\b(?!\s*(?:cedis|cedi|ghc|₵|\$))/i);
   const amount = amountMatch ? Math.min(parseInt(amountMatch[1]), 500) : 50;
-  const priceMatch = msg.match(/[₵$]?\s*(\d+(?:\.\d+)?)/g);
-  const price = priceMatch ? parseFloat(priceMatch[priceMatch.length - 1].replace(/[₵$\s]/g, "")) : undefined;
+
+  // Price = only if explicitly mentioned with ₵, $, cedis, or "at X" after category
+  const priceMatch = msg.match(/(?:at\s*[₵$]?|[₵$]|cedis?|price\s+(?:of\s+)?[₵$]?)\s*(\d+(?:\.\d+)?)/i);
+  const price = priceMatch ? parseFloat(priceMatch[1]) : undefined;
+
   return { action, category, amount, price };
 }
 
 function BotTab() {
   const [messages, setMessages] = useState<ChatMsg[]>([
-    { role: "bot", text: "👋 Hi! I'm your smart product bot. Tell me what to do:\n\n• \"Add 500 gaming products\"\n• \"Add 200 fashion items at ₵50 each\"\n• \"Delete all electronics\"\n• \"Set price of shoes to ₵80\"\n• \"Run full import\"" }
+    { role: "bot", text: "👋 Hi! I'm your smart product bot. Tell me what to do:\n\n• \"Add 500 gaming products\" → adds 500 items\n• \"Add 200 fashion items at ₵50 each\" → adds 200 items, price ₵50\n• \"Delete all electronics\"\n• \"Set price of shoes to ₵80\"\n\nQuantity = number of items. Price = only when you say 'at ₵X' or 'price ₵X'" }
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
