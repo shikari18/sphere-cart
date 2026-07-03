@@ -42,6 +42,8 @@ function CategoriesPage() {
     }),
   });
 
+  const productsList = Array.isArray(products) ? products : [];
+
   return (
     <PhoneShell>
       {/* Header */}
@@ -101,11 +103,11 @@ function CategoriesPage() {
                 <ProductCardSkeleton key={idx} />
               ))
             ) : (
-              products.map((p) => (
+              productsList.map((p) => (
                 <ProductCard key={p.id} product={p} />
               ))
             )}
-            {!isLoading && products.length === 0 && (
+            {!isLoading && productsList.length === 0 && (
               <p className="col-span-2 text-center text-sm text-muted-foreground py-10">No products found.</p>
             )}
           </div>

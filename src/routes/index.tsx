@@ -190,6 +190,8 @@ function Home() {
     queryFn: () => fetchCjProducts({ search: debouncedSearch, size: 24 }),
   });
 
+  const productsList = Array.isArray(products) ? products : [];
+
   return (
     <PhoneShell>
       {/* Header */}
@@ -269,7 +271,7 @@ function Home() {
               </div>
             ))
           ) : (
-            products.slice(0, 6).map((p) => (
+            productsList.slice(0, 6).map((p) => (
               <div key={p.id} className="min-w-[46%] w-[46%]">
                 <ProductCard product={p} />
               </div>
@@ -292,7 +294,7 @@ function Home() {
               <ProductCardSkeleton key={idx} />
             ))
           ) : (
-            products.map((p) => (
+            productsList.map((p) => (
               <ProductCard key={p.id} product={p} />
             ))
           )}
