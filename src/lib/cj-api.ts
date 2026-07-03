@@ -650,55 +650,6 @@ export const updateBotPriceByCategory = createServerFn({ method: "POST" })
     }
     return { updated };
   });
-  .handler(async () => {
-    const token = await getAccessToken();
-    const allItems: any[] = [];
-    const keywords = ["dress", "shoes", "electronics", "bag", "watch", "beauty", "home", "gaming"];
-
-    // Fetch from multiple keyword searches to get varied products
-    for (const kw of keywords) {
-      if (allItems.length >= 70) break;
-      try {
-        const res = await fetch(
-          `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=1&pageSize=10&keyWord=${encodeURIComponent(kw)}`,
-          { headers: { "CJ-Access-Token": token } }
-        );
-        const json = await res.json();
-        if (json.code === 200 && json.data?.content) {
-          for (const group of json.data.content) {
-            const list = group.productList || [];
-            allItems.push(...list);
-          }
-        }
-      } catch {}
-    }
-
-    if (allItems.length === 0) throw new Error("Could not fetch products from CJ catalog.");
-
-    const now = new Date();
-    return allItems.slice(0, 70).map((item: any) => {
-      const id = String(item.id || item.pid || "");
-      const title = item.nameEn || item.productNameEn || "Product";
-      const image = item.bigImage || item.productImage || "";
-      const sku = item.sku || item.productSku || "";
-      const category = autoCategorize(title);
-
-      const rawSellPrice = (item.sellPrice || item.nowPrice || "10.0").toString().split(" ")[0].split("-")[0].trim();
-      const priceUSD = parseFloat(rawSellPrice) || 10;
-      const costGHC = priceUSD * 15;
-      const priceGHC = parseFloat((costGHC * 1.20).toFixed(2));
-      const originalGHC = parseFloat((priceGHC * 2).toFixed(2));
-      const discountSteps = [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70];
-      const badge = `-${discountSteps[Math.abs(id.charCodeAt(0) || 0) % discountSteps.length]}%`;
-
-      return {
-        id, title, image, price: priceGHC, original: originalGHC,
-        category, sku, badge,
-        addedAt: now.toISOString(),
-        addedDate: now.toISOString().slice(0, 10),
-      };
-    });
-  });
 
 // ── Auto-Bot: kept for compatibility ─────────────────────────────────────────
 export const runCjAutoBot = createServerFn({ method: "POST" })
