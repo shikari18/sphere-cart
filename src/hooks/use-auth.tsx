@@ -6,6 +6,9 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  OAuthProvider,
   firebaseSignOut,
   onAuthStateChanged,
   saveUserProfile,
@@ -13,7 +16,9 @@ import {
   type UserProfile,
   type User,
 } from "@/lib/firebase";
-import { OAuthProvider } from "firebase/auth";
+
+// Detect mobile — use redirect instead of popup on mobile browsers
+const isMobile = typeof window !== "undefined" && /iPhone|iPad|Android/i.test(navigator.userAgent);
 
 export type { UserProfile };
 
@@ -40,6 +45,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Handle redirect result first (for mobile Google/Apple sign-in)
+    getRedirectResult(auth).then(async (result) => {
+      if (result?.user) {
+        const existing = await getUserProfile(result.user.uid);
+        if (!existing) {
+          await saveUserProfile(result.user.uid, {
+            uid: result.user.uid,
+            email: result.user.email || "",
+            name: result.user.displayName || "",
+            phone: "",
+            address: "",
+            onboardingComplete: false,
+          });
+        }
+      }
+    }).catch(() => {});
+
     const unsub = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (user) {
@@ -82,6 +104,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithGoogle = async (): Promise<string | null> => {
     try {
+      if (isMobile) {
+        await signInWithRedirect(auth, googleProvider);
+        return null; // page will reload after redirect
+      }
       const cred = await signInWithPopup(auth, googleProvider);
       const existing = await getUserProfile(cred.user.uid);
       if (!existing) {
@@ -105,6 +131,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const appleProvider = new OAuthProvider("apple.com");
       appleProvider.addScope("email");
       appleProvider.addScope("name");
+      if (isMobile) {
+        await signInWithRedirect(auth, appleProvider);
+        return null;
+      }
       const cred = await signInWithPopup(auth, appleProvider);
       const existing = await getUserProfile(cred.user.uid);
       if (!existing) {
