@@ -5,6 +5,27 @@ const apiKey = "CJ5292255@api@b5fe6ac793314066801c38bc47fcab0c";
 let cachedToken: string | null = null;
 let tokenExpiry: number = 0;
 
+// Local JSON database helpers — use dynamic imports to prevent bundling into browser
+async function readLocalProducts(): Promise<any[]> {
+  try {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const dbPath = path.resolve(process.cwd(), "src/data/imported-products.json");
+    const data = await fs.readFile(dbPath, "utf-8");
+    return JSON.parse(data);
+  } catch (error) {
+    console.error("Failed to read local JSON database, returning empty array:", error);
+    return [];
+  }
+}
+
+async function writeLocalProducts(products: any[]) {
+  const fs = await import("fs/promises");
+  const path = await import("path");
+  const dbPath = path.resolve(process.cwd(), "src/data/imported-products.json");
+  await fs.writeFile(dbPath, JSON.stringify(products, null, 2), "utf-8");
+}
+
 // Internal server-side helper to authenticate and cache the token
 async function getAccessToken(): Promise<string> {
   const now = Date.now();
@@ -76,29 +97,49 @@ function autoCategorize(title: string): string {
   return categories[charSum % categories.length];
 }
 
-// Server function to fetch products from CJ Dropshipping
+// Server function to fetch products from CJ Dropshipping (uses local JSON database first)
 export const fetchCjProducts = createServerFn(
   "GET",
-  async (payload: { category?: string; search?: string; page?: number; size?: number } = {}) => {
+  async (payload: { category?: string; search?: string; page?: number; size?: number; bypassLocal?: boolean } = {}) => {
     const token = await getAccessToken();
     const pageNum = payload.page || 1;
     const pageSize = payload.size || 24;
     const keyWord = (payload.search || payload.category || "").toLowerCase();
     
     try {
-      // 1. Fetch from My Products first
+      // 1. Check local JSON database first
+      let list = payload.bypassLocal ? [] : await readLocalProducts();
+      
+      if (list.length > 0) {
+        // Filter local products list by category/search
+        list = list.filter((item: any) => {
+          const title = (item.title || "").toLowerCase();
+          const sku = (item.sku || "").toLowerCase();
+          const itemCat = (item.category || "").toLowerCase();
+          
+          const matchesKeyword = !keyWord || title.includes(keyWord) || sku.includes(keyWord);
+          const matchesCategory = !payload.category || itemCat === payload.category.toLowerCase();
+          
+          return matchesKeyword && matchesCategory;
+        });
+        
+        // Paginate the local list
+        const start = (pageNum - 1) * pageSize;
+        return list.slice(start, start + pageSize);
+      }
+      
+      // 2. Fallback to My Products list in CJ account if local database is empty
       const myProductUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=${pageNum}&pageSize=100`;
       const response = await fetch(myProductUrl, {
         headers: { "CJ-Access-Token": token },
       });
       const json = await response.json();
       
-      let list: any[] = [];
       if (json.code === 200 && json.data?.content && json.data.content.length > 0) {
         list = json.data.content;
       }
       
-      // 2. Fallback to listV2 general catalog if My Products is empty
+      // 3. Fallback to listV2 general catalog if My Products is also empty
       if (list.length === 0) {
         const generalUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${pageNum}&pageSize=${pageSize}${keyWord ? `&keyWord=${encodeURIComponent(keyWord)}` : ""}`;
         const genResponse = await fetch(generalUrl, {
@@ -112,7 +153,7 @@ export const fetchCjProducts = createServerFn(
             : (dataObj?.list || []);
         }
       } else {
-        // If we are displaying My Products, filter them by keyword/category locally
+        // Filter My Products list locally by category/search
         list = list.filter((item: any) => {
           const title = (item.nameEn || item.name || "").toLowerCase();
           const sku = (item.sku || "").toLowerCase();
@@ -124,30 +165,26 @@ export const fetchCjProducts = createServerFn(
           return matchesKeyword && matchesCategory;
         });
         
-        // Paginate the filtered list locally
+        // Paginate local list
         const start = (pageNum - 1) * pageSize;
         list = list.slice(start, start + pageSize);
       }
 
       return list.map((item: any) => {
         const id = item.productId || item.id;
-        // Check if there is a custom override for this product ID or SKU
+        // Check overrides
         const override = productOverrides[id] || productOverrides[item.sku];
 
-        // Handle price ranges (e.g. "25.89-62.65")
         const rawSellPrice = item.sellPrice || "10.0";
         const priceUSDStr = rawSellPrice.toString().split("-")[0].trim();
         const priceUSD = parseFloat(priceUSDStr);
         
-        // CJ prices are USD. Convert to GHC (₵) with a standard rate of 15
         const rate = 15.0;
         let priceGHC = priceUSD * rate;
         
-        // Generate a random mockup discount (e.g. 55% to 78%)
         const discountRate = 0.5 + (Math.floor(id.slice(-2)) % 30) / 100;
         let originalGHC = priceGHC / (1 - discountRate);
 
-        // Apply overrides if present
         let displayTitle = item.nameEn || item.name || "Dova Product";
         let displayImage = item.bigImage || item.mainImage || "";
 
@@ -183,6 +220,38 @@ export const fetchCjProducts = createServerFn(
       console.error("CJ Fetch Products Error:", error);
       throw error;
     }
+  }
+);
+
+// Server function to fetch only imported products
+export const fetchImportedProducts = createServerFn(
+  "GET",
+  async () => {
+    return await readLocalProducts();
+  }
+);
+
+// Server function to import product into local JSON database
+export const importCjProduct = createServerFn(
+  "POST",
+  async (payload: { product: any }) => {
+    const localProds = await readLocalProducts();
+    if (!localProds.some((p: any) => p.id === payload.product.id)) {
+      localProds.push(payload.product);
+      await writeLocalProducts(localProds);
+    }
+    return { success: true };
+  }
+);
+
+// Server function to remove product from local JSON database
+export const removeImportedProduct = createServerFn(
+  "POST",
+  async (payload: { pid: string }) => {
+    let localProds = await readLocalProducts();
+    localProds = localProds.filter((p: any) => p.id !== payload.pid);
+    await writeLocalProducts(localProds);
+    return { success: true };
   }
 );
 

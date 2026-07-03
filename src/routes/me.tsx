@@ -44,6 +44,7 @@ const menu = [
   { Icon: Heart, label: "My Wishlist", meta: "24 items" },
   { Icon: ShoppingBag, label: "Recently Viewed", meta: "" },
   { Icon: MapPin, label: "Addresses", meta: "Circle, Accra" },
+  { Icon: Package, label: "Import Products", meta: "Admin", to: "/import" },
   { Icon: MessageCircle, label: "Messages", meta: "" },
   { Icon: Bell, label: "Notifications", meta: "On" },
   { Icon: HelpCircle, label: "Help Center", meta: "" },
@@ -140,18 +141,41 @@ function MePage() {
       </section>
 
       {/* Menu list */}
-      <section className="px-4 mt-4">
+      <section className="px-4 mt-4 animate-fade-in-up">
         <div className="bg-white rounded-2xl border border-border/60 shadow-[var(--shadow-card)] divide-y divide-border/60">
-          {menu.map(({ Icon, label, meta }) => (
-            <button key={label} className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/50 first:rounded-t-2xl last:rounded-b-2xl transition">
-              <div className="w-8 h-8 rounded-lg bg-primary-soft flex items-center justify-center">
-                <Icon className="w-4 h-4 text-primary" />
-              </div>
-              <span className="text-sm font-semibold flex-1 text-left">{label}</span>
-              {meta && <span className="text-xs text-muted-foreground">{meta}</span>}
-              <ChevronRight className="w-4 h-4 text-muted-foreground" />
-            </button>
-          ))}
+          {menu.map(({ Icon, label, meta, to }) => {
+            const inner = (
+              <>
+                <div className="w-8 h-8 rounded-lg bg-primary-soft flex items-center justify-center">
+                  <Icon className="w-4 h-4 text-primary" />
+                </div>
+                <span className="text-sm font-semibold flex-1 text-left">{label}</span>
+                {meta && <span className="text-xs text-muted-foreground">{meta}</span>}
+                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              </>
+            );
+
+            if (to) {
+              return (
+                <Link
+                  key={label}
+                  to={to}
+                  className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/50 first:rounded-t-2xl last:rounded-b-2xl transition"
+                >
+                  {inner}
+                </Link>
+              );
+            }
+
+            return (
+              <button
+                key={label}
+                className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/50 first:rounded-t-2xl last:rounded-b-2xl transition"
+              >
+                {inner}
+              </button>
+            );
+          })}
         </div>
       </section>
 
