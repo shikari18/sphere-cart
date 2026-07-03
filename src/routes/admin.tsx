@@ -8,9 +8,8 @@ import {
 import {
   collection, onSnapshot, deleteDoc, doc, setDoc,
   getDocs, query, orderBy, limit, getCountFromServer,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { fetchCjProducts, fetchBotCandidates } from "@/lib/cj-api";
+} from "firebase/firestore";import { db } from "@/lib/firebase";
+import { fetchCjProducts, fetchBotCandidates, saveBotProducts } from "@/lib/cj-api";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
@@ -428,49 +427,35 @@ function BotTab() {
     setProgress({ current: 0, total: 0, currentProduct: null });
 
     try {
-      // Step 1: Fetch candidates from CJ (one server call)
+      // Step 1: Fetch 70 candidates from CJ catalog
       const candidates = await fetchBotCandidates({ data: {} });
       if (!candidates || candidates.length === 0) {
-        throw new Error("No products found in your CJ My Products list.");
+        throw new Error("No products found in CJ catalog.");
       }
 
-      // Get existing IDs to skip duplicates — read directly from Firestore client
-      const existingSnap = await getDocs(collection(db, "bot_products"));
-      const existingIds = new Set(existingSnap.docs.map((d) => d.id));
-      const toAdd = (candidates as any[]).filter((p: any) => !existingIds.has(String(p.id)));
+      const toAdd = candidates as any[];
+      setProgress({ current: 0, total: toAdd.length, currentProduct: toAdd[0] || null });
 
-      setProgress({ current: 0, total: toAdd.length, currentProduct: null });
-
-      if (toAdd.length === 0) {
-        setDone(true);
-        setRunning(false);
-        return;
-      }
-
-      // Step 2: Save directly to Firestore from client — no server round trip
+      // Step 2: Save in batches of 5 via server function (bypasses Firestore rules)
+      const BATCH = 5;
       let added = 0;
-      for (const product of toAdd) {
-        setProgress({ current: added, total: toAdd.length, currentProduct: product });
 
-        // Write directly to Firestore (fast — no server function)
-        await setDoc(doc(db, "bot_products", String(product.id)), product);
-        added++;
+      for (let i = 0; i < toAdd.length; i += BATCH) {
+        const batch = toAdd.slice(i, i + BATCH);
+        setProgress({ current: added, total: toAdd.length, currentProduct: batch[0] });
 
-        // Small delay so UI updates visibly
-        await new Promise(r => setTimeout(r, 100));
+        await saveBotProducts({ data: { products: batch } });
+        added += batch.length;
+
+        setProgress({ current: added, total: toAdd.length, currentProduct: toAdd[Math.min(added, toAdd.length - 1)] });
+        await new Promise(r => setTimeout(r, 150)); // small pause for UI to breathe
       }
-
-      // Update bot status
-      await setDoc(doc(db, "bot_status", "latest"), {
-        lastRun: new Date().toISOString(),
-        addedToday: added,
-      });
 
       setProgress({ current: added, total: toAdd.length, currentProduct: null });
       setDone(true);
       setBotStatus({ lastRun: new Date().toISOString(), addedToday: added });
     } catch (e: any) {
-      setError(e.message || "Bot failed. Check your CJ My Products list.");
+      setError(e.message || "Bot failed. Try again.");
     }
 
     setRunning(false);

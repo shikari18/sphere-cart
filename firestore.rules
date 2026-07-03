@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users can read/write their own profile
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null; // admins can read all
+    }
+
+    // Bot products — readable by everyone, writable only server-side (no client rule needed)
+    match /bot_products/{productId} {
+      allow read: if true;
+      allow write: if false; // server-side only via Admin SDK
+    }
+
+    // Product overrides — readable by everyone
+    match /product_overrides/{productId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Removed products — readable by everyone
+    match /removed_products/{productId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Bot status — readable by everyone
+    match /bot_status/{doc} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Orders
+    match /orders/{orderId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

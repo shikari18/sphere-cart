@@ -553,13 +553,21 @@ export const adminGetCjProducts = createServerFn({ method: "GET" })
     });
   });
 
-// ── Auto-Bot: saves a single product to Firestore ────────────────────────────
-export const saveBotProduct = createServerFn({ method: "POST" })
-  .handler(async ({ data }: { data: { product: any } }) => {
+// ── Bot: save multiple products at once server-side (bypasses Firestore rules) ─
+export const saveBotProducts = createServerFn({ method: "POST" })
+  .handler(async ({ data }: { data: { products: any[] } }) => {
     const { db, doc, setDoc } = await getFirestoreAdmin();
-    const p = data.product;
-    await setDoc(doc(db, "bot_products", String(p.id)), p);
-    return { success: true };
+    const results: string[] = [];
+    for (const p of data.products) {
+      await setDoc(doc(db, "bot_products", String(p.id)), p);
+      results.push(String(p.id));
+    }
+    // Update bot status
+    await setDoc(doc(db, "bot_status", "latest"), {
+      lastRun: new Date().toISOString(),
+      addedToday: results.length,
+    });
+    return { saved: results };
   });
 
 // ── Bot: fetch products from CJ catalog search ────────────────────────────────
