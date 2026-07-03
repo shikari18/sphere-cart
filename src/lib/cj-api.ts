@@ -153,11 +153,11 @@ export const fetchCjProducts = createServerFn({ method: "GET" })
         const priceUSDStr = rawSellPrice.toString().split("-")[0].trim();
         const priceUSD = parseFloat(priceUSDStr);
 
-        const rate = 15.0;
-        let priceGHC = isNaN(priceUSD) ? 15 : priceUSD * rate;
-
-        const discountRate = 0.5 + (parseInt(id.slice(-2), 10) % 30) / 100;
-        let originalGHC = priceGHC / (1 - discountRate);
+        const rate = 15.0;        // USD → GHC conversion
+        const markup = 1.4;       // 40% profit margin above cost
+        const costGHC = isNaN(priceUSD) ? 15 : priceUSD * rate;
+        let priceGHC = parseFloat((costGHC * markup).toFixed(2));   // your selling price
+        let originalGHC = parseFloat((priceGHC * 2).toFixed(2));    // show as 50% off deal
 
         let displayTitle = normTitle;
         let displayImage = normImage;
