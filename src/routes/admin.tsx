@@ -422,12 +422,11 @@ function BotTab() {
     setProgress({ current: 0, total: 0 });
 
     const categories = ["Gaming", "Fashion", "Electronics", "Beauty", "Shoes", "Bags", "Watches", "Home", "dress", "watch"];
-    const perCategory = 50; // 10 categories × 50 = 500 total
+    const perCategory = 50;
     let totalSaved = 0;
 
     try {
       for (const cat of categories) {
-        if (!running) break;
         const candidates = await fetchBotByCategory({ data: { category: cat, amount: perCategory } });
         if (candidates && (candidates as any[]).length > 0) {
           const BATCH = 25;
@@ -439,6 +438,7 @@ function BotTab() {
           }
         }
       }
+      setProgress(p => ({ ...p, current: totalSaved }));
       setDone(true);
     } catch (e: any) {
       setError(e.message || "Bot failed. Try again.");
