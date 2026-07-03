@@ -8,6 +8,7 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { CartProvider } from "@/hooks/use-cart";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -77,10 +78,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Sphere — Shop everything, cheaper" },
-      { name: "description", content: "Sphere is your mobile marketplace for fashion, electronics, beauty and more with daily flash deals." },
-      { name: "author", content: "Sphere" },
-      { property: "og:title", content: "Sphere — Shop everything, cheaper" },
+      { title: "Zova — Shop everything, cheaper" },
+      { name: "description", content: "Zova is your mobile marketplace for fashion, electronics, beauty and more with daily flash deals." },
+      { name: "author", content: "Zova" },
+      { property: "og:title", content: "Zova — Shop everything, cheaper" },
       { property: "og:description", content: "Your mobile marketplace for fashion, electronics, beauty and more." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -118,8 +119,10 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
+      <CartProvider>
+        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+        <Outlet />
+      </CartProvider>
     </QueryClientProvider>
   );
 }

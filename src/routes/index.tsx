@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Bell, Search, Flame, ChevronRight } from "lucide-react";
 import { PhoneShell } from "@/components/PhoneShell";
 import { BottomNav } from "@/components/BottomNav";
-import { ProductCard } from "@/components/ProductCard";
+import { ProductCard, FloatingCart } from "@/components/ProductCard";
 import { products, categoryList } from "@/data/products";
 
 export const Route = createFileRoute("/")({
@@ -18,7 +18,7 @@ function Home() {
           <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center shadow-[var(--shadow-soft)]">
             <div className="w-4 h-4 rounded-full border-2 border-white" />
           </div>
-          <span className="text-xl font-extrabold tracking-tight">Sphere</span>
+          <span className="text-xl font-extrabold tracking-tight">Zova</span>
         </div>
         <button aria-label="Notifications" className="relative w-10 h-10 flex items-center justify-center rounded-full hover:bg-black/5 transition">
           <Bell className="w-5 h-5 text-foreground/80" />
@@ -110,6 +110,7 @@ function Home() {
       </section>
 
       <BottomNav />
+      <FloatingCart />
     </PhoneShell>
   );
 }
