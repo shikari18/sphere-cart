@@ -581,27 +581,27 @@ export const fetchBotByCategory = createServerFn({ method: "POST" })
     const token = await getAccessToken();
     const { category, amount, customPrice } = data;
     const allItems: any[] = [];
-    const pageSize = 100; // max per page
-    const pages = Math.ceil(amount / pageSize);
+    // CJ returns exactly 10 items per page in content[0].productList
+    // So we need amount/10 pages to get `amount` items
+    const pagesNeeded = Math.ceil(amount / 10);
 
-    for (let page = 1; page <= pages && allItems.length < amount; page++) {
+    for (let page = 1; page <= pagesNeeded && allItems.length < amount; page++) {
       try {
         const res = await fetch(
-          `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${page}&pageSize=${pageSize}&keyWord=${encodeURIComponent(category)}`,
+          `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${page}&pageSize=10&keyWord=${encodeURIComponent(category)}`,
           { headers: { "CJ-Access-Token": token } }
         );
         const json = await res.json();
-        if (json.code === 200 && json.data?.content) {
-          for (const group of json.data.content) {
-            const list = group.productList || [];
-            allItems.push(...list);
-            if (allItems.length >= amount) break;
-          }
+        if (json.code === 200 && json.data?.content?.length > 0) {
+          const list = json.data.content[0]?.productList || [];
+          allItems.push(...list);
         } else {
           break; // no more pages
         }
       } catch { break; }
     }
+
+    console.log(`[Bot] Fetched ${allItems.length} ${category} items from ${pagesNeeded} pages`);
 
     const now = new Date();
     return allItems.slice(0, amount).map((item: any) => {
@@ -613,7 +613,6 @@ export const fetchBotByCategory = createServerFn({ method: "POST" })
       const rawSellPrice = (item.sellPrice || item.nowPrice || "10.0").toString().split(" ")[0].split("-")[0].trim();
       const priceUSD = parseFloat(rawSellPrice) || 10;
       const costGHC = priceUSD * 15;
-      // Use custom price if specified, otherwise apply 20% markup
       const priceGHC = customPrice !== undefined ? customPrice : parseFloat((costGHC * 1.20).toFixed(2));
       const originalGHC = parseFloat((priceGHC * 2).toFixed(2));
       const discountSteps = [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70];
