@@ -575,8 +575,81 @@ export const saveBotProducts = createServerFn({ method: "POST" })
     return { saved: results };
   });
 
-// ── Bot: fetch products from CJ catalog search ────────────────────────────────
-export const fetchBotCandidates = createServerFn({ method: "GET" })
+// ── Bot: fetch products by category from CJ catalog ──────────────────────────
+export const fetchBotByCategory = createServerFn({ method: "POST" })
+  .handler(async ({ data }: { data: { category: string; amount: number; customPrice?: number } }) => {
+    const token = await getAccessToken();
+    const { category, amount, customPrice } = data;
+    const allItems: any[] = [];
+    const pageSize = Math.min(amount, 100);
+    const pages = Math.ceil(amount / pageSize);
+
+    for (let page = 1; page <= pages && allItems.length < amount; page++) {
+      try {
+        const res = await fetch(
+          `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${page}&pageSize=${pageSize}&keyWord=${encodeURIComponent(category)}`,
+          { headers: { "CJ-Access-Token": token } }
+        );
+        const json = await res.json();
+        if (json.code === 200 && json.data?.content) {
+          for (const group of json.data.content) {
+            const list = group.productList || [];
+            allItems.push(...list);
+            if (allItems.length >= amount) break;
+          }
+        }
+      } catch {}
+    }
+
+    const now = new Date();
+    return allItems.slice(0, amount).map((item: any) => {
+      const id = String(item.id || item.pid || Math.random());
+      const title = item.nameEn || item.productNameEn || "Product";
+      const image = item.bigImage || item.productImage || "";
+      const sku = item.sku || item.productSku || "";
+      const cat = autoCategorize(title);
+      const rawSellPrice = (item.sellPrice || item.nowPrice || "10.0").toString().split(" ")[0].split("-")[0].trim();
+      const priceUSD = parseFloat(rawSellPrice) || 10;
+      const costGHC = priceUSD * 15;
+      const priceGHC = customPrice !== undefined ? customPrice : parseFloat((costGHC * 1.20).toFixed(2));
+      const originalGHC = parseFloat((priceGHC * 2).toFixed(2));
+      const discountSteps = [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70];
+      const badge = `-${discountSteps[Math.abs(id.charCodeAt(0) || 0) % discountSteps.length]}%`;
+      return { id, title, image, price: priceGHC, original: originalGHC, category: cat, sku, badge, addedAt: now.toISOString(), addedDate: now.toISOString().slice(0, 10) };
+    });
+  });
+
+// ── Bot: delete products by category from Firestore ───────────────────────────
+export const deleteBotByCategory = createServerFn({ method: "POST" })
+  .handler(async ({ data }: { data: { category: string } }) => {
+    const { db, collection, getDocs, deleteDoc, doc } = await getFirestoreAdmin();
+    const snap = await getDocs(collection(db, "bot_products"));
+    let deleted = 0;
+    for (const d of snap.docs) {
+      const p = d.data();
+      if (!data.category || p.category?.toLowerCase() === data.category.toLowerCase()) {
+        await deleteDoc(doc(db, "bot_products", d.id));
+        deleted++;
+      }
+    }
+    return { deleted };
+  });
+
+// ── Bot: update price for products in a category ──────────────────────────────
+export const updateBotPriceByCategory = createServerFn({ method: "POST" })
+  .handler(async ({ data }: { data: { category: string; price: number } }) => {
+    const { db, collection, getDocs, setDoc, doc } = await getFirestoreAdmin();
+    const snap = await getDocs(collection(db, "bot_products"));
+    let updated = 0;
+    for (const d of snap.docs) {
+      const p = d.data();
+      if (!data.category || p.category?.toLowerCase() === data.category.toLowerCase()) {
+        await setDoc(doc(db, "bot_products", d.id), { ...p, price: data.price }, { merge: true });
+        updated++;
+      }
+    }
+    return { updated };
+  });
   .handler(async () => {
     const token = await getAccessToken();
     const allItems: any[] = [];
@@ -613,7 +686,7 @@ export const fetchBotCandidates = createServerFn({ method: "GET" })
       const rawSellPrice = (item.sellPrice || item.nowPrice || "10.0").toString().split(" ")[0].split("-")[0].trim();
       const priceUSD = parseFloat(rawSellPrice) || 10;
       const costGHC = priceUSD * 15;
-      const priceGHC = parseFloat((costGHC * 1.15).toFixed(2));
+      const priceGHC = parseFloat((costGHC * 1.20).toFixed(2));
       const originalGHC = parseFloat((priceGHC * 2).toFixed(2));
       const discountSteps = [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70];
       const badge = `-${discountSteps[Math.abs(id.charCodeAt(0) || 0) % discountSteps.length]}%`;

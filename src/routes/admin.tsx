@@ -9,7 +9,7 @@ import {
   collection, onSnapshot, deleteDoc, doc, setDoc,
   getDocs, query, orderBy, limit, getCountFromServer,
 } from "firebase/firestore";import { db } from "@/lib/firebase";
-import { fetchCjProducts, fetchBotCandidates, saveBotProducts } from "@/lib/cj-api";
+import { fetchCjProducts, fetchBotCandidates, saveBotProducts, fetchBotByCategory, deleteBotByCategory, updateBotPriceByCategory } from "@/lib/cj-api";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
@@ -399,151 +399,153 @@ function ManualAddProduct() {
   );
 }
 
-// ── Bot Tab ───────────────────────────────────────────────────────────────────
+// ── Smart Bot Chat ────────────────────────────────────────────────────────────
+type ChatMsg = { role: "user" | "bot"; text: string; loading?: boolean };
+const CATEGORIES = ["Gaming", "Fashion", "Electronics", "Beauty", "Shoes", "Bags", "Watches", "Home"];
+
+function parseIntent(msg: string) {
+  const lower = msg.toLowerCase();
+  const action = lower.includes("delete") || lower.includes("remove") ? "delete"
+    : lower.includes("price") || lower.includes("set price") || lower.includes("update price") || lower.includes("change price") ? "price"
+    : lower.includes("add") || lower.includes("import") || lower.includes("get") || lower.includes("fetch") ? "add"
+    : "unknown";
+  const category = CATEGORIES.find(c => lower.includes(c.toLowerCase()));
+  const amountMatch = msg.match(/\b(\d{1,4})\b/);
+  const amount = amountMatch ? Math.min(parseInt(amountMatch[1]), 500) : 50;
+  const priceMatch = msg.match(/[₵$]?\s*(\d+(?:\.\d+)?)/g);
+  const price = priceMatch ? parseFloat(priceMatch[priceMatch.length - 1].replace(/[₵$\s]/g, "")) : undefined;
+  return { action, category, amount, price };
+}
+
 function BotTab() {
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState<{ current: number; total: number; currentProduct: any | null }>({ current: 0, total: 0, currentProduct: null });
-  const [done, setDone] = useState(false);
-  const [error, setError] = useState("");
+  const [messages, setMessages] = useState<ChatMsg[]>([
+    { role: "bot", text: "👋 Hi! I'm your smart product bot. Tell me what to do:\n\n• \"Add 500 gaming products\"\n• \"Add 200 fashion items at ₵50 each\"\n• \"Delete all electronics\"\n• \"Set price of shoes to ₵80\"\n• \"Run full import\"" }
+  ]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
   const [botProducts, setBotProducts] = useState<any[]>([]);
-  const [botStatus, setBotStatus] = useState<{ lastRun?: string; addedToday?: number } | null>(null);
 
   useEffect(() => {
     const unsub = onSnapshot(
-      query(collection(db, "bot_products"), orderBy("addedAt", "desc"), limit(10)),
+      query(collection(db, "bot_products"), orderBy("addedAt", "desc"), limit(8)),
       (snap) => setBotProducts(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
     );
-    getDocs(collection(db, "bot_status")).then(snap => {
-      const latest = snap.docs.find(d => d.id === "latest");
-      if (latest) setBotStatus(latest.data() as any);
-    });
     return unsub;
   }, []);
 
-  const runBot = async () => {
-    setRunning(true);
-    setDone(false);
-    setError("");
-    setProgress({ current: 0, total: 0, currentProduct: null });
+  const addMsg = (msg: ChatMsg) => setMessages(prev => [...prev.filter(m => !m.loading), msg]);
+
+  const handleSend = async (text?: string) => {
+    const msg = (text || input).trim();
+    if (!msg || busy) return;
+    setInput("");
+    setMessages(prev => [...prev, { role: "user", text: msg }]);
+    setBusy(true);
+    setMessages(prev => [...prev, { role: "bot", text: "⏳ Working on it...", loading: true }]);
 
     try {
-      // Step 1: Fetch 70 candidates from CJ catalog
-      const candidates = await fetchBotCandidates({ data: {} });
-      if (!candidates || candidates.length === 0) {
-        throw new Error("No products found in CJ catalog.");
+      const { action, category, amount, price } = parseIntent(msg);
+
+      if (action === "add") {
+        const cat = category || "Fashion";
+        const amt = amount || 50;
+        addMsg({ role: "bot", text: `🔍 Fetching ${amt} ${cat} products from CJ...` });
+
+        const candidates = await fetchBotByCategory({ data: { category: cat, amount: amt, customPrice: price } });
+        if (!candidates || (candidates as any[]).length === 0) {
+          addMsg({ role: "bot", text: `❌ No products found for "${cat}". Try a different category.` });
+        } else {
+          const BATCH = 10;
+          let saved = 0;
+          for (let i = 0; i < (candidates as any[]).length; i += BATCH) {
+            const batch = (candidates as any[]).slice(i, i + BATCH);
+            await saveBotProducts({ data: { products: batch } });
+            saved += batch.length;
+          }
+          const priceNote = price ? ` at ₵${price} each` : " with 20% markup";
+          addMsg({ role: "bot", text: `✅ Done! Added ${saved} ${cat} products${priceNote}. They're live on your store now!` });
+        }
+      } else if (action === "delete") {
+        const cat = category || "";
+        addMsg({ role: "bot", text: `🗑️ Deleting ${cat || "all bot products"}...` });
+        const result = await deleteBotByCategory({ data: { category: cat } });
+        addMsg({ role: "bot", text: `✅ Deleted ${(result as any).deleted} products${cat ? ` from ${cat}` : ""}.` });
+      } else if (action === "price") {
+        if (!price) {
+          addMsg({ role: "bot", text: "❓ Please specify a price. E.g. \"Set price of shoes to ₵80\"" });
+        } else {
+          const cat = category || "";
+          addMsg({ role: "bot", text: `💰 Updating prices${cat ? ` for ${cat}` : ""}...` });
+          const result = await updateBotPriceByCategory({ data: { category: cat, price } });
+          addMsg({ role: "bot", text: `✅ Updated ${(result as any).updated} products to ₵${price}.` });
+        }
+      } else {
+        addMsg({ role: "bot", text: `❓ I didn't understand. Try:\n• "Add 100 gaming products"\n• "Delete fashion items"\n• "Set price of shoes to ₵50"` });
       }
-
-      const toAdd = candidates as any[];
-      setProgress({ current: 0, total: toAdd.length, currentProduct: toAdd[0] || null });
-
-      // Step 2: Save in batches of 5 via server function (bypasses Firestore rules)
-      const BATCH = 5;
-      let added = 0;
-
-      for (let i = 0; i < toAdd.length; i += BATCH) {
-        const batch = toAdd.slice(i, i + BATCH);
-        setProgress({ current: added, total: toAdd.length, currentProduct: batch[0] });
-
-        await saveBotProducts({ data: { products: batch } });
-        added += batch.length;
-
-        setProgress({ current: added, total: toAdd.length, currentProduct: toAdd[Math.min(added, toAdd.length - 1)] });
-        await new Promise(r => setTimeout(r, 150)); // small pause for UI to breathe
-      }
-
-      setProgress({ current: added, total: toAdd.length, currentProduct: null });
-      setDone(true);
-      setBotStatus({ lastRun: new Date().toISOString(), addedToday: added });
     } catch (e: any) {
-      setError(e.message || "Bot failed. Try again.");
+      addMsg({ role: "bot", text: `❌ Error: ${e.message || "Something went wrong. Try again."}` });
     }
-
-    setRunning(false);
+    setBusy(false);
   };
-
-  const pct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
 
   return (
     <div className="mt-4 flex flex-col gap-4">
-      <div className="bg-white rounded-2xl p-5 border border-border/60 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="text-sm font-extrabold">Auto-Import Bot</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Imports your CJ products with 15% markup</p>
+      <div className="bg-white rounded-2xl border border-border/60 shadow-sm overflow-hidden">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border/60 bg-primary/5">
+          <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center">
+            <Bot className="w-5 h-5 text-white" />
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
-            <Bot className={`w-6 h-6 text-primary ${running ? "animate-pulse" : ""}`} />
+          <div>
+            <p className="text-sm font-extrabold">MB Bot</p>
+            <p className="text-[11px] text-muted-foreground">Smart product assistant</p>
+          </div>
+          <div className="ml-auto flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-green-500" />
+            <span className="text-[10px] text-green-600 font-semibold">Online</span>
           </div>
         </div>
-
-        {botStatus && !running && (
-          <div className="bg-secondary/60 rounded-xl p-3 mb-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold">Last run</p>
-              <p className="text-[11px] text-muted-foreground">{botStatus.lastRun ? new Date(botStatus.lastRun).toLocaleString() : "Never"}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs font-semibold">Added</p>
-              <p className="text-lg font-extrabold text-primary">{botStatus.addedToday ?? 0}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Live progress */}
-        {running && (
-          <div className="mb-4 flex flex-col gap-3">
-            <div className="flex items-center justify-between text-xs font-semibold">
-              <span>{progress.current} / {progress.total} products</span>
-              <span className="text-primary">{pct}%</span>
-            </div>
-            <div className="w-full h-3 bg-secondary rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary rounded-full transition-all duration-300"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            {progress.currentProduct && (
-              <div className="flex items-center gap-2 bg-secondary/60 rounded-xl p-2.5">
-                {progress.currentProduct.image && (
-                  <img src={progress.currentProduct.image} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0 bg-secondary" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="text-[11px] font-semibold truncate">{progress.currentProduct.title}</p>
-                  <p className="text-[10px] text-muted-foreground">Adding... ₵{progress.currentProduct.price?.toFixed(2)}</p>
-                </div>
-                <RefreshCw className="w-3.5 h-3.5 text-primary animate-spin shrink-0" />
+        <div className="h-64 overflow-y-auto p-4 flex flex-col gap-3">
+          {messages.map((m, i) => (
+            <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs whitespace-pre-line ${
+                m.role === "user" ? "bg-primary text-white rounded-br-sm" : "bg-secondary text-foreground rounded-bl-sm"
+              } ${m.loading ? "animate-pulse opacity-70" : ""}`}>
+                {m.text}
               </div>
-            )}
-          </div>
-        )}
-
-        {done && !running && (
-          <div className="mb-4 bg-green-50 rounded-xl p-3 border border-green-200 flex items-center gap-2">
-            <Check className="w-4 h-4 text-green-600 shrink-0" />
-            <p className="text-xs text-green-700 font-semibold">Done! {progress.current} products imported successfully.</p>
-          </div>
-        )}
-
-        {error && (
-          <div className="mb-4 bg-destructive/10 rounded-xl p-3 border border-destructive/20">
-            <p className="text-xs text-destructive font-semibold">{error}</p>
-          </div>
-        )}
-
-        <button
-          onClick={runBot}
-          disabled={running}
-          className="w-full flex items-center justify-center gap-2 bg-primary text-white font-extrabold py-3.5 rounded-full hover:opacity-90 active:scale-[0.98] transition disabled:opacity-60 shadow-lg"
-        >
-          {running ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          {running ? `Importing... (${progress.current}/${progress.total})` : "Run Bot Now"}
-        </button>
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-border/60 p-3 flex gap-2">
+          <input
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleSend()}
+            placeholder="e.g. Add 500 gaming products..."
+            disabled={busy}
+            className="flex-1 rounded-xl border border-border px-3 py-2.5 text-sm outline-none focus:border-primary disabled:opacity-50"
+          />
+          <button
+            onClick={() => handleSend()}
+            disabled={busy || !input.trim()}
+            className="bg-primary text-white px-4 rounded-xl font-bold text-sm disabled:opacity-50 hover:opacity-90 transition flex items-center justify-center"
+          >
+            {busy ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Send"}
+          </button>
+        </div>
       </div>
 
-      {/* Manual add by CJ Product ID */}
-      <ManualAddProduct />
+      <div className="bg-white rounded-2xl border border-border/60 shadow-sm p-4">
+        <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-3">Quick Actions</p>
+        <div className="grid grid-cols-2 gap-2">
+          {CATEGORIES.map(cat => (
+            <button key={cat} onClick={() => handleSend(`Add 500 ${cat} products`)}
+              className="flex items-center gap-2 bg-secondary/60 rounded-xl px-3 py-2.5 text-xs font-semibold hover:bg-secondary transition text-left">
+              <Play className="w-3 h-3 text-primary shrink-0" /> 500 {cat}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {/* Recent bot products */}
       <div>
         <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">Recently Added</h3>
         <div className="flex flex-col gap-2">
@@ -557,11 +559,10 @@ function BotTab() {
               <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-semibold shrink-0">{p.category}</span>
             </div>
           ))}
-          {botProducts.length === 0 && !running && (
+          {botProducts.length === 0 && (
             <div className="text-center py-8 bg-white rounded-2xl border border-border/60">
               <Bot className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">No bot products yet</p>
-              <p className="text-xs text-muted-foreground">Run the bot to import your products</p>
+              <p className="text-sm text-muted-foreground">Chat with the bot to add products</p>
             </div>
           )}
         </div>
