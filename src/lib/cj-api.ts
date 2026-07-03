@@ -27,6 +27,7 @@ async function writeLocalProducts(products: any[]) {
 }
 
 // Internal server-side helper to authenticate and cache the token
+// Token is cached for 5 minutes so new products appear quickly
 async function getAccessToken(): Promise<string> {
   const now = Date.now();
   if (cachedToken && now < tokenExpiry) {
@@ -43,8 +44,8 @@ async function getAccessToken(): Promise<string> {
     const json = await response.json();
     if (json.code === 200 && json.data?.accessToken) {
       cachedToken = json.data.accessToken;
-      // Cache token for 1 hour to prevent constant refetching
-      tokenExpiry = now + 3600 * 1000;
+      // Cache token for 5 minutes only — keeps product list fresh
+      tokenExpiry = now + 5 * 60 * 1000;
       return cachedToken;
     }
     throw new Error(json.message || "Failed to authenticate with CJ Dropshipping API");
@@ -109,7 +110,7 @@ function normalizeCjItem(item: any, payloadCategory?: string) {
 }
 
 // Server function to fetch products from CJ Dropshipping
-// Priority: 1. Local JSON database  2. CJ My Products (auto-synced)  3. General catalog fallback
+// Priority: 1. CJ My Products (live)  2. General catalog fallback
 export const fetchCjProducts = createServerFn({ method: "GET" })
   .handler(async ({ data }: { data?: { category?: string; search?: string; page?: number; size?: number; bypassLocal?: boolean } }) => {
     const payload = data || {};
@@ -120,25 +121,9 @@ export const fetchCjProducts = createServerFn({ method: "GET" })
 
     try {
       console.log("[fetchCjProducts] payload:", payload);
-      // ── 1. Local JSON database (explicitly imported via Import Panel) ─────────
-      let localList = payload.bypassLocal ? [] : await readLocalProducts();
-      console.log("[fetchCjProducts] Read local products count:", localList.length);
 
-      if (localList.length > 0) {
-        localList = localList.filter((item: any) => {
-          const title = (item.title || "").toLowerCase();
-          const sku = (item.sku || "").toLowerCase();
-          const itemCat = (item.category || "").toLowerCase();
-          const matchesKeyword = !keyWord || title.includes(keyWord) || sku.includes(keyWord);
-          const matchesCategory = !payload.category || itemCat === payload.category.toLowerCase();
-          return matchesKeyword && matchesCategory;
-        });
-        console.log("[fetchCjProducts] Local products filtered count:", localList.length);
-        const start = (pageNum - 1) * pageSize;
-        return localList.slice(start, start + pageSize);
-      }
-
-      // ── 2. CJ My Products — auto-synced live from CJ dashboard ───────────────
+      // ── 1. CJ My Products — always fetched live from CJ dashboard ────────────
+      // This ensures any product added on CJ appears immediately without manual import
       let rawList: any[] = [];
       const myProductUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=1&pageSize=200`;
       console.log("[fetchCjProducts] Fetching CJ myProduct list from:", myProductUrl);
@@ -153,7 +138,7 @@ export const fetchCjProducts = createServerFn({ method: "GET" })
       }
       console.log("[fetchCjProducts] CJ myProduct live count:", rawList.length);
 
-      // ── 3. General catalog fallback if My Products is empty ───────────────────
+      // ── 2. General catalog fallback if My Products is empty ───────────────────
       if (rawList.length === 0) {
         const genUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${pageNum}&pageSize=${pageSize}${keyWord ? `&keyWord=${encodeURIComponent(keyWord)}` : ""}`;
         console.log("[fetchCjProducts] Fallback: fetching general catalog from:", genUrl);

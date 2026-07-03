@@ -76,7 +76,7 @@ function CartPage() {
         clearCart();
         setCheckoutStep("success");
       } else {
-        throw new Error(response.message || "Failed to create order on CJ Dropshipping");
+        throw new Error(response.message || "Failed to place order. Please try again.");
       }
     } catch (err: any) {
       console.error(err);
@@ -92,7 +92,7 @@ function CartPage() {
           <Loader2 className="w-16 h-16 animate-spin text-primary mb-6" />
           <h2 className="text-xl font-extrabold mb-2">Processing Order</h2>
           <p className="text-sm text-muted-foreground">
-            Submitting order details directly to CJ Dropshipping...
+            Processing your order...
           </p>
         </div>
       </PhoneShell>
@@ -106,10 +106,10 @@ function CartPage() {
           <CheckCircle2 className="w-20 h-20 text-emerald-500 mb-6 animate-bounce" />
           <h2 className="text-2xl font-extrabold mb-2 text-emerald-600">Order Placed!</h2>
           <p className="text-sm text-muted-foreground mb-6">
-            Your order was successfully pushed to CJ Dropshipping!
+            Your order was placed successfully!
           </p>
           <div className="bg-secondary rounded-2xl p-4 w-full mb-8 border border-border/40">
-            <span className="text-xs text-muted-foreground block mb-1">CJ Order Number / ID</span>
+            <span className="text-xs text-muted-foreground block mb-1">Order Number</span>
             <span className="font-mono font-bold text-foreground text-sm">{placedOrderId}</span>
           </div>
           <Link
@@ -297,7 +297,7 @@ function CartPage() {
               type="submit"
               className="w-full bg-flame hover:bg-flame/90 text-white font-extrabold text-base py-3.5 rounded-full shadow-2xl transition active:scale-[0.98]"
             >
-              Submit Order to CJ Dropshipping (₵{selectedTotal.toFixed(2)})
+              Submit Order
             </button>
           </div>
         </form>

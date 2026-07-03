@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Star, ShoppingCart, X, ChevronLeft, Minus, Plus, Truck, Shield, RotateCcw, Loader2 } from "lucide-react";
+import { Star, ShoppingCart, X, ChevronLeft, ChevronRight, Minus, Plus, Truck, Shield, RotateCcw, Loader2 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import type { Product } from "@/data/products";
@@ -7,6 +7,22 @@ import { useCart } from "@/hooks/use-cart";
 import { fetchCjVariants, type CJVariant } from "@/lib/cj-api";
 
 // ─── Product Detail Sheet (Temu-style) ───────────────────────────────────────
+
+// Helper: extract a "size" token from a variant name (S, M, L, XL, XXL, 2XL, numbers, etc.)
+function extractSize(name: string): string | null {
+  const m = name.match(/\b(X{0,3}S|X{0,3}L|XXL|XL|2XL|3XL|4XL|XS|SM|MD|LG|\bS\b|\bM\b|\bL\b|\d+(?:cm|mm|inch|")?\b)/i);
+  return m ? m[0].toUpperCase() : null;
+}
+
+// Helper: extract a colour token from a variant name
+function extractColor(name: string): string | null {
+  const colors = ["black","white","red","blue","green","yellow","pink","purple","orange","grey","gray","brown","beige","navy","cream","khaki","camel","rose","wine","army"];
+  const lower = name.toLowerCase();
+  for (const c of colors) {
+    if (lower.includes(c)) return c.charAt(0).toUpperCase() + c.slice(1);
+  }
+  return null;
+}
 
 function ProductSheet({
   product,
@@ -17,7 +33,8 @@ function ProductSheet({
 }) {
   const { addItem, items } = useCart();
   const [qty, setQty] = useState(1);
-  const [selectedVariant, setSelectedVariant] = useState<CJVariant | null>(null);
+  const [colorIndex, setColorIndex] = useState(0);
+  const [selectedSize, setSelectedSize] = useState<string | null>(null);
 
   // Fetch variants from CJ Dropshipping API
   const { data: variants = [], isLoading } = useQuery({
@@ -26,24 +43,60 @@ function ProductSheet({
     enabled: !!product.id,
   });
 
-  // Automatically select the first variant when loaded
-  useEffect(() => {
-    if (variants.length > 0 && !selectedVariant) {
-      setSelectedVariant(variants[0]);
+  // Derive colour groups and unique sizes from variants
+  // A "colour group" = variants that share the same colour token (or same image)
+  const colorGroups: { color: string; image: string; variants: CJVariant[] }[] = [];
+  for (const v of variants) {
+    const col = extractColor(v.variantNameEn) || v.variantNameEn.split(" ")[0];
+    const img = v.variantImage || product.image;
+    const existing = colorGroups.find((g) => g.color === col);
+    if (existing) {
+      existing.variants.push(v);
+      if (!existing.image && img) existing.image = img;
+    } else {
+      colorGroups.push({ color: col, image: img, variants: [v] });
     }
-  }, [variants, selectedVariant]);
+  }
 
-  // Determine current display fields based on selection
-  const displayImage = selectedVariant?.variantImage || product.image;
-  const displayTitle = selectedVariant 
+  const uniqueSizes: string[] = [];
+  for (const v of variants) {
+    const s = extractSize(v.variantNameEn);
+    if (s && !uniqueSizes.includes(s)) uniqueSizes.push(s);
+  }
+
+  // On load: default to first color, first size
+  useEffect(() => {
+    if (variants.length > 0 && selectedSize === null && uniqueSizes.length > 0) {
+      setSelectedSize(uniqueSizes[0]);
+    }
+  }, [variants]);
+
+  const currentColorGroup = colorGroups[colorIndex] || null;
+
+  // Find the best matching variant for current color + size selection
+  const selectedVariant: CJVariant | null = (() => {
+    if (!currentColorGroup) return variants[0] || null;
+    if (uniqueSizes.length === 0) return currentColorGroup.variants[0] || null;
+    const sized = currentColorGroup.variants.find((v) => {
+      const s = extractSize(v.variantNameEn);
+      return s === selectedSize;
+    });
+    return sized || currentColorGroup.variants[0] || null;
+  })();
+
+  const goToColor = (idx: number) => {
+    setColorIndex(Math.max(0, Math.min(idx, colorGroups.length - 1)));
+  };
+
+  // Display fields
+  const displayImage = (currentColorGroup?.image) || selectedVariant?.variantImage || product.image;
+  const displayTitle = selectedVariant
     ? `${product.title} (${selectedVariant.variantNameEn})`
     : product.title;
-  const displaySku = selectedVariant?.variantSku || product.sku;
-  
-  // CJ prices are USD. Convert to GHC with rate of 15
+  const displaySku = selectedVariant?.variantSku || (product as any).sku || "";
+
   const rawPriceUSD = selectedVariant?.variantSellPrice || (product.price / 15.0);
   const displayPrice = rawPriceUSD * 15.0;
-  
   const discount = Math.round(((product.original - displayPrice) / product.original) * 100);
 
   const cartItem = items.find((i) => i.id === (selectedVariant ? `${product.id}-${selectedVariant.vid}` : product.id));
@@ -82,12 +135,12 @@ function ProductSheet({
         </div>
 
         <div className="overflow-y-auto max-h-[80vh] pb-32">
-          {/* Hero image */}
+          {/* Hero image with left/right COLOR navigation */}
           <div className="relative aspect-[4/3] bg-secondary overflow-hidden mx-4 rounded-2xl">
             <img
               src={displayImage}
               alt={displayTitle}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover transition-all duration-300"
             />
             {product.badge && (
               <span className="absolute top-3 left-3 bg-destructive text-destructive-foreground text-xs font-extrabold px-2 py-0.5 rounded-md">
@@ -99,6 +152,31 @@ function ProductSheet({
                 #1 TOP RATED
               </span>
             )}
+            {/* Color navigation arrows — only when multiple colour groups exist */}
+            {colorGroups.length > 1 && (
+              <>
+                <button
+                  onClick={() => goToColor(colorIndex - 1)}
+                  disabled={colorIndex === 0}
+                  className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/80 backdrop-blur flex items-center justify-center shadow disabled:opacity-30 active:scale-95 transition"
+                  aria-label="Previous colour"
+                >
+                  <ChevronLeft className="w-5 h-5 text-foreground" />
+                </button>
+                <button
+                  onClick={() => goToColor(colorIndex + 1)}
+                  disabled={colorIndex === colorGroups.length - 1}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/80 backdrop-blur flex items-center justify-center shadow disabled:opacity-30 active:scale-95 transition"
+                  aria-label="Next colour"
+                >
+                  <ChevronRight className="w-5 h-5 text-foreground" />
+                </button>
+                {/* Colour label */}
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur text-white text-[10px] font-bold px-3 py-1 rounded-full">
+                  {currentColorGroup?.color} · {colorIndex + 1}/{colorGroups.length}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Info */}
@@ -107,7 +185,7 @@ function ProductSheet({
             <div className="flex items-center gap-2 mb-2">
               <span className="bg-destructive/10 text-destructive text-[10px] font-extrabold px-2 py-0.5 rounded">SALE</span>
               <span className="text-[11px] text-emerald-600 font-semibold">✓ Free shipping</span>
-              <span className="text-[11px] text-emerald-600 font-semibold">· Arrives in 7 days</span>
+              <span className="text-[11px] text-emerald-600 font-semibold">· Arrives within 7 days</span>
             </div>
 
             <h2 className="text-base font-bold leading-snug text-foreground">{displayTitle}</h2>
@@ -140,35 +218,29 @@ function ProductSheet({
               <span className="text-xs text-muted-foreground">· {product.sold}</span>
             </div>
 
-            {/* Variant Selector */}
+            {/* Sizes — separate row of pill buttons */}
             {isLoading ? (
               <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground bg-secondary/50 rounded-xl p-3">
                 <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                <span>Loading product options...</span>
+                <span>Loading options...</span>
               </div>
-            ) : variants.length > 0 ? (
+            ) : uniqueSizes.length > 0 ? (
               <div className="mt-4">
-                <span className="text-xs font-bold text-foreground/85 block mb-2">Style / Option:</span>
-                <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1">
-                  {variants.map((v) => {
-                    const isSelected = selectedVariant?.vid === v.vid;
-                    return (
-                      <button
-                        key={v.vid}
-                        onClick={() => setSelectedVariant(v)}
-                        className={`text-xs px-2.5 py-1.5 rounded-xl border font-medium flex items-center gap-1.5 transition ${
-                          isSelected
-                            ? "border-primary bg-primary/5 text-primary font-bold"
-                            : "border-border hover:bg-secondary text-foreground/80"
-                        }`}
-                      >
-                        {v.variantImage && (
-                          <img src={v.variantImage} alt="" className="w-5 h-5 rounded object-cover shrink-0" />
-                        )}
-                        <span className="max-w-[120px] truncate">{v.variantNameEn}</span>
-                      </button>
-                    );
-                  })}
+                <span className="text-xs font-bold text-foreground/85 block mb-2">Size:</span>
+                <div className="flex flex-wrap gap-2">
+                  {uniqueSizes.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setSelectedSize(s)}
+                      className={`text-sm font-bold px-4 py-1.5 rounded-full border transition ${
+                        selectedSize === s
+                          ? "border-primary bg-primary text-white"
+                          : "border-border hover:bg-secondary text-foreground/80"
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
                 </div>
               </div>
             ) : null}

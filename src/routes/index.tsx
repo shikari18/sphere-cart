@@ -186,19 +186,41 @@ function ProductCardSkeleton() {
 
 function Home() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchResults, setSearchResults] = useState<any[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
 
   // Products are loaded server-side via the route loader above
   const { products: loaderProducts } = Route.useLoaderData();
 
-  // Filter loaded products when user searches client-side
-  const productsList = searchQuery
-    ? loaderProducts.filter((p: any) =>
-        p.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.sku?.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : loaderProducts;
+  const handleSearch = async () => {
+    const q = searchInput.trim();
+    if (!q) {
+      setSearchResults(null);
+      setSearchQuery("");
+      return;
+    }
+    setSearchQuery(q);
+    setIsSearching(true);
+    try {
+      const results = await fetchCjProducts({ data: { search: q, size: 24 } });
+      setSearchResults(Array.isArray(results) ? results : []);
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
-  const isLoading = false;
+  const clearSearch = () => {
+    setSearchInput("");
+    setSearchQuery("");
+    setSearchResults(null);
+  };
+
+  // Show search results if active, otherwise show loader products
+  const productsList = searchResults !== null ? searchResults : loaderProducts;
+  const isLoading = isSearching;
 
   return (
     <PhoneShell>
@@ -217,23 +239,41 @@ function Home() {
       {/* Search */}
       <div className="px-5">
         <div className="flex items-center gap-2 bg-white rounded-full pl-4 pr-1.5 py-1.5 shadow-[var(--shadow-card)] border border-border/60">
-          <Search className="w-4 h-4 text-muted-foreground" />
+          <Search className="w-4 h-4 text-muted-foreground shrink-0" />
           <input
             className="flex-1 bg-transparent outline-none text-sm py-2 placeholder:text-muted-foreground"
             placeholder="Search for anything..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
           />
-          <button className="bg-primary text-primary-foreground text-sm font-semibold px-5 py-2 rounded-full hover:opacity-90 transition">
+          {searchQuery && (
+            <button
+              onClick={clearSearch}
+              className="text-muted-foreground hover:text-foreground text-xs px-2 py-1"
+            >
+              ✕
+            </button>
+          )}
+          <button
+            onClick={handleSearch}
+            className="bg-primary text-primary-foreground text-sm font-semibold px-5 py-2 rounded-full hover:opacity-90 transition"
+          >
             Search
           </button>
         </div>
+        {searchQuery && (
+          <p className="text-xs text-muted-foreground mt-2 px-1">
+            {isSearching ? "Searching..." : `Results for "${searchQuery}" — ${productsList.length} found`}
+          </p>
+        )}
       </div>
 
-      {/* Hero Carousel */}
-      <HeroCarousel />
+      {/* Hero Carousel — hide when showing search results */}
+      {!searchQuery && <HeroCarousel />}
 
-      {/* Categories — professional pill tiles */}
+      {/* Categories — hide when showing search results */}
+      {!searchQuery && (
       <section className="px-5 mt-6">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-bold">Shop by category</h3>
@@ -256,8 +296,10 @@ function Home() {
           ))}
         </div>
       </section>
+      )}
 
-      {/* Flash deals */}
+      {/* Flash deals — hide when showing search results */}
+      {!searchQuery && (
       <div className="px-5 mt-7 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 bg-flame text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-[var(--shadow-soft)]">
@@ -287,14 +329,16 @@ function Home() {
           )}
         </div>
       </div>
+      )}
 
-      {/* For You grid */}
+      {/* For You / Search Results grid */}
       <section className="px-5 mt-8">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-bold flex items-center gap-2">
-            <span className="w-1 h-4 rounded bg-primary" /> For You
+            <span className="w-1 h-4 rounded bg-primary" />
+            {searchQuery ? `Results for "${searchQuery}"` : "For You"}
           </h3>
-          <span className="text-[10px] text-muted-foreground">Handpicked daily</span>
+          {!searchQuery && <span className="text-[10px] text-muted-foreground">Handpicked daily</span>}
         </div>
         <div className="grid grid-cols-2 gap-3">
           {isLoading ? (
