@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Bell, Search, Flame, ChevronRight } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { PhoneShell } from "@/components/PhoneShell";
 import { BottomNav } from "@/components/BottomNav";
 import { ProductCard, FloatingCart } from "@/components/ProductCard";
@@ -218,8 +218,17 @@ function Home() {
     setSearchResults(null);
   };
 
-  // Show search results if active, otherwise show loader products
-  const productsList = searchResults !== null ? searchResults : loaderProducts;
+  // Show search results if active, otherwise show loader products shuffled randomly
+  const productsList = useMemo(() => {
+    const base = searchResults !== null ? searchResults : loaderProducts;
+    if (searchResults !== null) return base; // keep search results in order
+    // Shuffle so new products appear at random positions, not always at top
+    return [...base].sort((a: any, b: any) => {
+      const ah = (a.id || "").split("").reduce((s: number, c: string) => s + c.charCodeAt(0), 0);
+      const bh = (b.id || "").split("").reduce((s: number, c: string) => s + c.charCodeAt(0), 0);
+      return (ah % 31) - (bh % 31);
+    });
+  }, [searchResults, loaderProducts]);
   const isLoading = isSearching;
 
   return (

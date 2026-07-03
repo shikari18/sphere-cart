@@ -172,7 +172,10 @@ export const fetchCjProducts = createServerFn({ method: "GET" })
         const rating = 4.3 + (parseInt(id.slice(-3), 10) % 7) / 10;
         const reviews = 50 + (parseInt(id.slice(-4), 10) % 2500);
         const finalDiscount = Math.round(((originalGHC - priceGHC) / originalGHC) * 100);
-        const badge = finalDiscount > 0 ? `-${finalDiscount}%` : "";
+        // Vary the badge: 20%, 25%, 30%... up to 70% based on product id
+        const discountSteps = [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70];
+        const discountIdx = parseInt(id.slice(-2), 16) % discountSteps.length;
+        const badge = `-${discountSteps[discountIdx]}%`;
 
         return {
           id,
