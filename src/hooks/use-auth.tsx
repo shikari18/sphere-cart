@@ -45,27 +45,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Handle redirect result first (for mobile Google/Apple sign-in)
+    // Handle redirect result (mobile Google/Apple sign-in returns here after redirect)
     getRedirectResult(auth).then(async (result) => {
       if (result?.user) {
-        const existing = await getUserProfile(result.user.uid);
+        const user = result.user;
+        const existing = await getUserProfile(user.uid);
         if (!existing) {
-          await saveUserProfile(result.user.uid, {
-            uid: result.user.uid,
-            email: result.user.email || "",
-            name: result.user.displayName || "",
+          await saveUserProfile(user.uid, {
+            uid: user.uid,
+            email: user.email || "",
+            name: user.displayName || "",
             phone: "",
             address: "",
             onboardingComplete: false,
           });
         }
+        // Refresh profile after redirect
+        const p = await getUserProfile(user.uid);
+        setProfile(p);
+        setFirebaseUser(user);
+        setIsLoading(false);
       }
     }).catch(() => {});
 
     const unsub = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (user) {
-        const p = await getUserProfile(user.uid);
+        let p = await getUserProfile(user.uid);
+        // Auto-create profile if missing (e.g. after Google redirect on first load)
+        if (!p) {
+          await saveUserProfile(user.uid, {
+            uid: user.uid,
+            email: user.email || "",
+            name: user.displayName || "",
+            phone: "",
+            address: "",
+            onboardingComplete: false,
+          });
+          p = await getUserProfile(user.uid);
+        }
         setProfile(p);
       } else {
         setProfile(null);
@@ -171,7 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile((p) => p ? { ...p, ...data } : null);
   };
 
-  const needsOnboarding = !!firebaseUser && profile !== null && !profile.onboardingComplete;
+  const needsOnboarding = !!firebaseUser && profile !== null && !profile.onboardingComplete && !profile.address;
 
   return (
     <AuthContext.Provider value={{

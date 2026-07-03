@@ -186,8 +186,12 @@ function AuthScreen() {
 
 // ── Onboarding Screen ─────────────────────────────────────────────────────────
 function OnboardingScreen() {
-  const { completeOnboarding, firebaseUser } = useAuth();
-  const [form, setForm] = useState({ name: firebaseUser?.displayName || "", phone: "", address: "" });
+  const { completeOnboarding, firebaseUser, profile } = useAuth();
+  const [form, setForm] = useState({
+    name: profile?.name || firebaseUser?.displayName || "",
+    phone: profile?.phone || "",
+    address: profile?.address || "",
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -200,6 +204,12 @@ function OnboardingScreen() {
     await completeOnboarding(form);
     setLoading(false);
   };
+
+  const skip = () => completeOnboarding({
+    name: profile?.name || firebaseUser?.displayName || "User",
+    phone: "",
+    address: "",
+  });
 
   return (
     <PhoneShell>
@@ -262,7 +272,7 @@ function OnboardingScreen() {
 
           <button
             type="button"
-            onClick={() => completeOnboarding({ name: firebaseUser?.displayName || "Guest", phone: "", address: "" })}
+            onClick={skip}
             className="text-xs text-muted-foreground text-center"
           >
             Skip for now
