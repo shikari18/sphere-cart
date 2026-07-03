@@ -300,35 +300,37 @@ function Home() {
 
       {/* Flash deals — hide when showing search results */}
       {!searchQuery && (
-      <div className="px-5 mt-7 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 bg-flame text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-[var(--shadow-soft)]">
-            <Flame className="w-3.5 h-3.5" /> Flash Deals
+        <>
+        <div className="px-5 mt-7 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 bg-flame text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-[var(--shadow-soft)]">
+              <Flame className="w-3.5 h-3.5" /> Flash Deals
+            </div>
+            <span className="text-xs text-muted-foreground font-medium">
+              Ends in <span className="text-foreground font-semibold">02:14:37</span>
+            </span>
           </div>
-          <span className="text-xs text-muted-foreground font-medium">
-            Ends in <span className="text-foreground font-semibold">02:14:37</span>
-          </span>
+          <button className="text-xs font-semibold text-primary">See all ›</button>
         </div>
-        <button className="text-xs font-semibold text-primary">See all ›</button>
-      </div>
 
-      <div className="mt-3 overflow-x-auto no-scrollbar">
-        <div className="flex gap-3 px-5 pb-1">
-          {isLoading ? (
-            Array.from({ length: 4 }).map((_, idx) => (
-              <div key={idx} className="min-w-[46%] w-[46%]">
-                <ProductCardSkeleton />
-              </div>
-            ))
-          ) : (
-            productsList.slice(0, 6).map((p) => (
-              <div key={p.id} className="min-w-[46%] w-[46%]">
-                <ProductCard product={p} />
-              </div>
-            ))
-          )}
+        <div className="mt-3 overflow-x-auto no-scrollbar">
+          <div className="flex gap-3 px-5 pb-1">
+            {isLoading ? (
+              Array.from({ length: 4 }).map((_, idx) => (
+                <div key={idx} className="min-w-[46%] w-[46%]">
+                  <ProductCardSkeleton />
+                </div>
+              ))
+            ) : (
+              productsList.slice(0, 6).map((p) => (
+                <div key={p.id} className="min-w-[46%] w-[46%]">
+                  <ProductCard product={p} />
+                </div>
+              ))
+            )}
+          </div>
         </div>
-      </div>
+        </>
       )}
 
       {/* For You / Search Results grid */}
