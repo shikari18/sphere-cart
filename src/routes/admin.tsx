@@ -10,7 +10,7 @@ import {
   getDocs, query, orderBy, limit, getCountFromServer,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { fetchCjProducts, runCjAutoBot } from "@/lib/cj-api";
+import { fetchCjProducts, runCjAutoBot, fetchBotCandidates, saveBotProduct } from "@/lib/cj-api";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
@@ -333,17 +333,18 @@ function ProductsTab() {
 // ── Bot Tab ───────────────────────────────────────────────────────────────────
 function BotTab() {
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<{ added: number; timestamp: string } | null>(null);
+  const [progress, setProgress] = useState<{ current: number; total: number; currentProduct: any | null }>({ current: 0, total: 0, currentProduct: null });
+  const [done, setDone] = useState(false);
   const [error, setError] = useState("");
   const [botProducts, setBotProducts] = useState<any[]>([]);
   const [botStatus, setBotStatus] = useState<{ lastRun?: string; addedToday?: number } | null>(null);
+  const cancelRef = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(
       query(collection(db, "bot_products"), orderBy("addedAt", "desc"), limit(10)),
       (snap) => setBotProducts(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
     );
-    // Get bot status
     getDocs(collection(db, "bot_status")).then(snap => {
       const latest = snap.docs.find(d => d.id === "latest");
       if (latest) setBotStatus(latest.data() as any);
@@ -353,19 +354,65 @@ function BotTab() {
 
   const runBot = async () => {
     setRunning(true);
+    setDone(false);
     setError("");
+    setProgress({ current: 0, total: 0, currentProduct: null });
+    cancelRef[1](false);
+
     try {
-      const res = await runCjAutoBot({ data: {} });
-      setResult(res as any);
+      // Step 1: Fetch candidates from CJ (fast — no Firestore writes)
+      const candidates = await fetchBotCandidates({ data: {} });
+      if (!candidates || candidates.length === 0) {
+        throw new Error("No products found in your CJ My Products list.");
+      }
+
+      // Get existing IDs to skip duplicates
+      const existingSnap = await getDocs(collection(db, "bot_products"));
+      const existingIds = new Set(existingSnap.docs.map((d) => d.id));
+      const toAdd = candidates.filter((p: any) => !existingIds.has(String(p.id)));
+
+      setProgress({ current: 0, total: toAdd.length, currentProduct: null });
+
+      if (toAdd.length === 0) {
+        setDone(true);
+        setRunning(false);
+        return;
+      }
+
+      // Step 2: Save one product at a time with live progress
+      let added = 0;
+      for (const product of toAdd) {
+        if (cancelRef[0]) break;
+
+        setProgress({ current: added, total: toAdd.length, currentProduct: product });
+
+        await saveBotProduct({ data: { product } });
+        added++;
+
+        // Small delay so UI updates are visible
+        await new Promise(r => setTimeout(r, 200));
+      }
+
+      // Update bot status
+      await setDoc(doc(db, "bot_status", "latest"), {
+        lastRun: new Date().toISOString(),
+        addedToday: added,
+      });
+
+      setProgress({ current: added, total: toAdd.length, currentProduct: null });
+      setDone(true);
+      setBotStatus({ lastRun: new Date().toISOString(), addedToday: added });
     } catch (e: any) {
       setError(e.message || "Bot failed. Check your CJ My Products list.");
     }
+
     setRunning(false);
   };
 
+  const pct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
+
   return (
     <div className="mt-4 flex flex-col gap-4">
-      {/* Bot control card */}
       <div className="bg-white rounded-2xl p-5 border border-border/60 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -373,20 +420,61 @@ function BotTab() {
             <p className="text-xs text-muted-foreground mt-0.5">Imports your CJ products with 15% markup</p>
           </div>
           <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
-            <Bot className="w-6 h-6 text-primary" />
+            <Bot className={`w-6 h-6 text-primary ${running ? "animate-pulse" : ""}`} />
           </div>
         </div>
 
-        {botStatus && (
+        {botStatus && !running && (
           <div className="bg-secondary/60 rounded-xl p-3 mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold">Last run</p>
               <p className="text-[11px] text-muted-foreground">{botStatus.lastRun ? new Date(botStatus.lastRun).toLocaleString() : "Never"}</p>
             </div>
             <div className="text-right">
-              <p className="text-xs font-semibold">Added today</p>
+              <p className="text-xs font-semibold">Added</p>
               <p className="text-lg font-extrabold text-primary">{botStatus.addedToday ?? 0}</p>
             </div>
+          </div>
+        )}
+
+        {/* Live progress */}
+        {running && (
+          <div className="mb-4 flex flex-col gap-3">
+            <div className="flex items-center justify-between text-xs font-semibold">
+              <span>{progress.current} / {progress.total} products</span>
+              <span className="text-primary">{pct}%</span>
+            </div>
+            <div className="w-full h-3 bg-secondary rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-300"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            {progress.currentProduct && (
+              <div className="flex items-center gap-2 bg-secondary/60 rounded-xl p-2.5">
+                {progress.currentProduct.image && (
+                  <img src={progress.currentProduct.image} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0 bg-secondary" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-semibold truncate">{progress.currentProduct.title}</p>
+                  <p className="text-[10px] text-muted-foreground">Adding... ₵{progress.currentProduct.price?.toFixed(2)}</p>
+                </div>
+                <RefreshCw className="w-3.5 h-3.5 text-primary animate-spin shrink-0" />
+              </div>
+            )}
+          </div>
+        )}
+
+        {done && !running && (
+          <div className="mb-4 bg-green-50 rounded-xl p-3 border border-green-200 flex items-center gap-2">
+            <Check className="w-4 h-4 text-green-600 shrink-0" />
+            <p className="text-xs text-green-700 font-semibold">Done! {progress.current} products imported successfully.</p>
+          </div>
+        )}
+
+        {error && (
+          <div className="mb-4 bg-destructive/10 rounded-xl p-3 border border-destructive/20">
+            <p className="text-xs text-destructive font-semibold">{error}</p>
           </div>
         )}
 
@@ -396,23 +484,8 @@ function BotTab() {
           className="w-full flex items-center justify-center gap-2 bg-primary text-white font-extrabold py-3.5 rounded-full hover:opacity-90 active:scale-[0.98] transition disabled:opacity-60 shadow-lg"
         >
           {running ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          {running ? "Importing products..." : "Run Bot Now"}
+          {running ? `Importing... (${progress.current}/${progress.total})` : "Run Bot Now"}
         </button>
-
-        {result && (
-          <div className="mt-3 bg-green-50 rounded-xl p-3 border border-green-200 flex items-center gap-2">
-            <Check className="w-4 h-4 text-green-600 shrink-0" />
-            <div>
-              <p className="text-xs text-green-700 font-semibold">Successfully added {result.added} products</p>
-              <p className="text-[10px] text-green-600">{new Date(result.timestamp).toLocaleString()}</p>
-            </div>
-          </div>
-        )}
-        {error && (
-          <div className="mt-3 bg-destructive/10 rounded-xl p-3 border border-destructive/20">
-            <p className="text-xs text-destructive font-semibold">{error}</p>
-          </div>
-        )}
       </div>
 
       {/* Recent bot products */}
@@ -429,7 +502,7 @@ function BotTab() {
               <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-semibold shrink-0">{p.category}</span>
             </div>
           ))}
-          {botProducts.length === 0 && (
+          {botProducts.length === 0 && !running && (
             <div className="text-center py-8 bg-white rounded-2xl border border-border/60">
               <Bot className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
               <p className="text-sm text-muted-foreground">No bot products yet</p>

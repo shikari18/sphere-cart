@@ -553,73 +553,49 @@ export const adminGetCjProducts = createServerFn({ method: "GET" })
     });
   });
 
-// ── Auto-Bot: fetches from CJ My Products and saves to Firestore ─────────────
+// ── Auto-Bot: saves a single product to Firestore ────────────────────────────
+export const saveBotProduct = createServerFn({ method: "POST" })
+  .handler(async ({ data }: { data: { product: any } }) => {
+    const { db, doc, setDoc } = await getFirestoreAdmin();
+    const p = data.product;
+    await setDoc(doc(db, "bot_products", String(p.id)), p);
+    return { success: true };
+  });
 
-export const runCjAutoBot = createServerFn({ method: "POST" })
+// ── Auto-Bot: fetches My Products list (no Firestore write, just returns data) ─
+export const fetchBotCandidates = createServerFn({ method: "GET" })
   .handler(async () => {
     const token = await getAccessToken();
-
-    // Fetch all My Products (up to 200)
     const myProdRes = await fetch(
       `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=1&pageSize=200`,
       { headers: { "CJ-Access-Token": token } }
     );
     const myProdJson = await myProdRes.json();
-
-    if (myProdJson.code !== 200) {
-      throw new Error(myProdJson.message || "Failed to fetch My Products from CJ");
-    }
-
+    if (myProdJson.code !== 200) throw new Error(myProdJson.message || "Failed to fetch My Products");
     const items: any[] = myProdJson.data?.content || [];
-    if (items.length === 0) throw new Error("No products found in your CJ My Products list.");
 
-    const { db, doc, setDoc, collection, getDocs } = await getFirestoreAdmin();
-
-    // Get existing bot product IDs to avoid duplicates
-    const existingSnap = await getDocs(collection(db, "bot_products"));
-    const existingIds = new Set(existingSnap.docs.map((d) => d.id));
-
-    let added = 0;
-    const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
-
-    for (const item of items) {
+    return items.map((item: any) => {
       const norm = normalizeCjItem(item);
       const id = String(norm.id);
-      if (!id || existingIds.has(id)) continue;
-
-      // Parse sell price, convert USD → GHC (×15), add 15% markup
       const rawSellPrice = item.sellPrice || "10.0";
       const priceUSDStr = rawSellPrice.toString().split("-")[0].trim();
       const priceUSD = parseFloat(priceUSDStr);
       const costGHC = isNaN(priceUSD) ? 15 : priceUSD * 15;
       const priceGHC = parseFloat((costGHC * 1.15).toFixed(2));
       const originalGHC = parseFloat((priceGHC * 2).toFixed(2));
-
       const discountSteps = [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70];
       const badge = `-${discountSteps[parseInt(id.slice(-2), 16) % discountSteps.length]}%`;
-
-      await setDoc(doc(db, "bot_products", id), {
-        id,
-        title: norm.title,
-        image: norm.image,
-        price: priceGHC,
-        original: originalGHC,
-        category: norm.category,
-        sku: norm.sku,
-        badge,
-        addedAt: now.toISOString(),
-        addedDate: todayStr,
-      });
-
-      added++;
-    }
-
-    // Update bot status
-    await setDoc(doc(db, "bot_status", "latest"), {
-      lastRun: now.toISOString(),
-      addedToday: added,
+      return {
+        id, title: norm.title, image: norm.image, price: priceGHC,
+        original: originalGHC, category: norm.category, sku: norm.sku, badge,
+        addedAt: new Date().toISOString(), addedDate: new Date().toISOString().slice(0, 10),
+      };
     });
+  });
 
-    return { added, timestamp: now.toISOString() };
+// ── Auto-Bot: kept for compatibility ─────────────────────────────────────────
+export const runCjAutoBot = createServerFn({ method: "POST" })
+  .handler(async () => {
+    // Delegate to fetchBotCandidates — actual saving is done client-side per product
+    return { added: 0, timestamp: new Date().toISOString() };
   });
