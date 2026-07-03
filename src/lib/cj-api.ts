@@ -97,7 +97,19 @@ function autoCategorize(title: string): string {
   return categories[charSum % categories.length];
 }
 
-// Server function to fetch products from CJ Dropshipping (uses local JSON database first)
+// Helper to normalise a CJ product item from any endpoint into the standard shape
+function normalizeCjItem(item: any, payloadCategory?: string) {
+  // myProduct/query uses: productId, nameEn, bigImage, sku
+  // product/list uses: pid, productNameEn, productImage, productSku
+  const id = item.productId || item.pid || item.id;
+  const title = item.nameEn || item.productNameEn || item.name || "Dova Product";
+  const image = item.bigImage || item.productImage || item.mainImage || "";
+  const sku = item.sku || item.productSku || "";
+  return { id, title, image, sku, rawItem: item, category: payloadCategory || autoCategorize(title) };
+}
+
+// Server function to fetch products from CJ Dropshipping
+// Priority: 1. Local JSON database  2. CJ My Products (auto-synced)  3. General catalog fallback
 export const fetchCjProducts = createServerFn(
   "GET",
   async (payload: { category?: string; search?: string; page?: number; size?: number; bypassLocal?: boolean } = {}) => {
@@ -105,88 +117,76 @@ export const fetchCjProducts = createServerFn(
     const pageNum = payload.page || 1;
     const pageSize = payload.size || 24;
     const keyWord = (payload.search || payload.category || "").toLowerCase();
-    
+
     try {
-      // 1. Check local JSON database first
-      let list = payload.bypassLocal ? [] : await readLocalProducts();
-      
-      if (list.length > 0) {
-        // Filter local products list by category/search
-        list = list.filter((item: any) => {
+      // ── 1. Local JSON database (explicitly imported via Import Panel) ─────────
+      let localList = payload.bypassLocal ? [] : await readLocalProducts();
+
+      if (localList.length > 0) {
+        localList = localList.filter((item: any) => {
           const title = (item.title || "").toLowerCase();
           const sku = (item.sku || "").toLowerCase();
           const itemCat = (item.category || "").toLowerCase();
-          
           const matchesKeyword = !keyWord || title.includes(keyWord) || sku.includes(keyWord);
           const matchesCategory = !payload.category || itemCat === payload.category.toLowerCase();
-          
           return matchesKeyword && matchesCategory;
         });
-        
-        // Paginate the local list
         const start = (pageNum - 1) * pageSize;
-        return list.slice(start, start + pageSize);
+        return localList.slice(start, start + pageSize);
       }
-      
-      // 2. Fallback to My Products list in CJ account if local database is empty
-      const myProductUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=${pageNum}&pageSize=100`;
-      const response = await fetch(myProductUrl, {
-        headers: { "CJ-Access-Token": token },
-      });
-      const json = await response.json();
-      
-      if (json.code === 200 && json.data?.content && json.data.content.length > 0) {
-        list = json.data.content;
+
+      // ── 2. CJ My Products — auto-synced live from CJ dashboard ───────────────
+      let rawList: any[] = [];
+      const myProdRes = await fetch(
+        `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=1&pageSize=200`,
+        { headers: { "CJ-Access-Token": token } }
+      );
+      const myProdJson = await myProdRes.json();
+      if (myProdJson.code === 200 && myProdJson.data?.content?.length > 0) {
+        rawList = myProdJson.data.content;
       }
-      
-      // 3. Fallback to listV2 general catalog if My Products is also empty
-      if (list.length === 0) {
-        const generalUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${pageNum}&pageSize=${pageSize}${keyWord ? `&keyWord=${encodeURIComponent(keyWord)}` : ""}`;
-        const genResponse = await fetch(generalUrl, {
-          headers: { "CJ-Access-Token": token },
-        });
-        const genJson = await genResponse.json();
+
+      // ── 3. General catalog fallback if My Products is empty ───────────────────
+      if (rawList.length === 0) {
+        const genUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${pageNum}&pageSize=${pageSize}${keyWord ? `&keyWord=${encodeURIComponent(keyWord)}` : ""}`;
+        const genRes = await fetch(genUrl, { headers: { "CJ-Access-Token": token } });
+        const genJson = await genRes.json();
         if (genJson.code === 200) {
-          const dataObj = genJson.data;
-          list = Array.isArray(dataObj) 
-            ? (dataObj[0]?.list || []) 
-            : (dataObj?.list || []);
+          const d = genJson.data;
+          rawList = Array.isArray(d) ? (d[0]?.list || []) : (d?.list || []);
         }
       } else {
-        // Filter My Products list locally by category/search
-        list = list.filter((item: any) => {
-          const title = (item.nameEn || item.name || "").toLowerCase();
-          const sku = (item.sku || "").toLowerCase();
-          const itemCat = autoCategorize(item.nameEn || item.name || "").toLowerCase();
-          
-          const matchesKeyword = !keyWord || title.includes(keyWord) || sku.includes(keyWord);
-          const matchesCategory = !payload.category || itemCat === payload.category.toLowerCase();
-          
+        // Filter and paginate My Products
+        rawList = rawList.filter((item: any) => {
+          const norm = normalizeCjItem(item);
+          const matchesKeyword = !keyWord || norm.title.toLowerCase().includes(keyWord) || norm.sku.toLowerCase().includes(keyWord);
+          const matchesCategory = !payload.category || norm.category.toLowerCase() === payload.category.toLowerCase();
           return matchesKeyword && matchesCategory;
         });
-        
-        // Paginate local list
         const start = (pageNum - 1) * pageSize;
-        list = list.slice(start, start + pageSize);
+        rawList = rawList.slice(start, start + pageSize);
       }
 
-      return list.map((item: any) => {
-        const id = item.productId || item.id;
-        // Check overrides
-        const override = productOverrides[id] || productOverrides[item.sku];
+      return rawList.map((item: any) => {
+        const norm = normalizeCjItem(item, payload.category);
+        const { id, title: normTitle, image: normImage, sku: normSku, category: normCat } = norm;
 
+        // Check overrides
+        const override = productOverrides[id] || productOverrides[normSku];
+
+        // Handle price ranges like "25.89-62.65" — take lowest price
         const rawSellPrice = item.sellPrice || "10.0";
         const priceUSDStr = rawSellPrice.toString().split("-")[0].trim();
         const priceUSD = parseFloat(priceUSDStr);
-        
+
         const rate = 15.0;
         let priceGHC = priceUSD * rate;
-        
+
         const discountRate = 0.5 + (Math.floor(id.slice(-2)) % 30) / 100;
         let originalGHC = priceGHC / (1 - discountRate);
 
-        let displayTitle = item.nameEn || item.name || "Dova Product";
-        let displayImage = item.bigImage || item.mainImage || "";
+        let displayTitle = normTitle;
+        let displayImage = normImage;
 
         if (override) {
           if (override.title) displayTitle = override.title;
@@ -197,12 +197,11 @@ export const fetchCjProducts = createServerFn(
 
         const rating = 4.3 + (Math.floor(id.slice(-3)) % 7) / 10;
         const reviews = 50 + (Math.floor(id.slice(-4)) % 2500);
-        
         const finalDiscount = Math.round(((originalGHC - priceGHC) / originalGHC) * 100);
         const badge = finalDiscount > 0 ? `-${finalDiscount}%` : "";
 
         return {
-          id: id,
+          id,
           title: displayTitle,
           image: displayImage,
           price: parseFloat(priceGHC.toFixed(2)),
@@ -211,9 +210,9 @@ export const fetchCjProducts = createServerFn(
           rating: parseFloat(rating.toFixed(1)),
           reviews,
           badge,
-          category: payload.category || autoCategorize(item.nameEn || item.name || ""),
+          category: normCat,
           topRated: rating > 4.7,
-          sku: item.sku,
+          sku: normSku,
         };
       });
     } catch (error) {
