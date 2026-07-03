@@ -2,8 +2,6 @@ import { createServerFn } from "@tanstack/react-start";
 import { productOverrides } from "@/data/product-overrides";
 
 const apiKey = "CJ5292255@api@b5fe6ac793314066801c38bc47fcab0c";
-let cachedToken: string | null = null;
-let tokenExpiry: number = 0;
 
 // Local JSON database helpers — use dynamic imports to prevent bundling into browser
 async function readLocalProducts(): Promise<any[]> {
@@ -26,14 +24,8 @@ async function writeLocalProducts(products: any[]) {
   await fs.writeFile(dbPath, JSON.stringify(products, null, 2), "utf-8");
 }
 
-// Internal server-side helper to authenticate and cache the token
-// Token is cached for 5 minutes so new products appear quickly
+// Internal server-side helper to authenticate — no caching so product changes reflect immediately
 async function getAccessToken(): Promise<string> {
-  const now = Date.now();
-  if (cachedToken && now < tokenExpiry) {
-    return cachedToken;
-  }
-  
   try {
     const response = await fetch("https://developers.cjdropshipping.com/api2.0/v1/authentication/getAccessToken", {
       method: "POST",
@@ -43,10 +35,7 @@ async function getAccessToken(): Promise<string> {
     
     const json = await response.json();
     if (json.code === 200 && json.data?.accessToken) {
-      cachedToken = json.data.accessToken;
-      // Cache token for 5 minutes only — keeps product list fresh
-      tokenExpiry = now + 5 * 60 * 1000;
-      return cachedToken;
+      return json.data.accessToken;
     }
     throw new Error(json.message || "Failed to authenticate with CJ Dropshipping API");
   } catch (error) {
