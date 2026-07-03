@@ -10,7 +10,7 @@ import {
   getDocs, query, orderBy, limit, getCountFromServer,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { fetchCjProducts, runCjAutoBot, fetchBotCandidates, saveBotProduct } from "@/lib/cj-api";
+import { fetchCjProducts, fetchBotCandidates } from "@/lib/cj-api";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
@@ -338,7 +338,6 @@ function BotTab() {
   const [error, setError] = useState("");
   const [botProducts, setBotProducts] = useState<any[]>([]);
   const [botStatus, setBotStatus] = useState<{ lastRun?: string; addedToday?: number } | null>(null);
-  const cancelRef = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -357,19 +356,18 @@ function BotTab() {
     setDone(false);
     setError("");
     setProgress({ current: 0, total: 0, currentProduct: null });
-    cancelRef[1](false);
 
     try {
-      // Step 1: Fetch candidates from CJ (fast — no Firestore writes)
+      // Step 1: Fetch candidates from CJ (one server call)
       const candidates = await fetchBotCandidates({ data: {} });
       if (!candidates || candidates.length === 0) {
         throw new Error("No products found in your CJ My Products list.");
       }
 
-      // Get existing IDs to skip duplicates
+      // Get existing IDs to skip duplicates — read directly from Firestore client
       const existingSnap = await getDocs(collection(db, "bot_products"));
       const existingIds = new Set(existingSnap.docs.map((d) => d.id));
-      const toAdd = candidates.filter((p: any) => !existingIds.has(String(p.id)));
+      const toAdd = (candidates as any[]).filter((p: any) => !existingIds.has(String(p.id)));
 
       setProgress({ current: 0, total: toAdd.length, currentProduct: null });
 
@@ -379,18 +377,17 @@ function BotTab() {
         return;
       }
 
-      // Step 2: Save one product at a time with live progress
+      // Step 2: Save directly to Firestore from client — no server round trip
       let added = 0;
       for (const product of toAdd) {
-        if (cancelRef[0]) break;
-
         setProgress({ current: added, total: toAdd.length, currentProduct: product });
 
-        await saveBotProduct({ data: { product } });
+        // Write directly to Firestore (fast — no server function)
+        await setDoc(doc(db, "bot_products", String(product.id)), product);
         added++;
 
-        // Small delay so UI updates are visible
-        await new Promise(r => setTimeout(r, 200));
+        // Small delay so UI updates visibly
+        await new Promise(r => setTimeout(r, 100));
       }
 
       // Update bot status

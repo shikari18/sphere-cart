@@ -6,6 +6,8 @@ import { BottomNav } from "@/components/BottomNav";
 import { ProductCard, FloatingCart } from "@/components/ProductCard";
 import { categoryList } from "@/data/products";
 import { fetchCjProducts } from "@/lib/cj-api";
+import { collection, onSnapshot } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
 export const Route = createFileRoute("/")({
   // Server-side loader: fetches CJ products before the page renders
@@ -185,13 +187,22 @@ function ProductCardSkeleton() {
 }
 
 function Home() {
-  const [searchQuery, setSearchQuery] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [botProducts, setBotProducts] = useState<any[]>([]);
 
   // Products are loaded server-side via the route loader above
   const { products: loaderProducts } = Route.useLoaderData();
+
+  // Real-time bot products from Firestore — auto-updates when bot adds new ones
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "bot_products"), (snap) => {
+      setBotProducts(snap.docs.map((d) => ({ ...d.data() } as any)));
+    });
+    return unsub;
+  }, []);
 
   const handleSearch = async () => {
     const q = searchInput.trim();
@@ -218,17 +229,24 @@ function Home() {
     setSearchResults(null);
   };
 
-  // Show search results if active, otherwise show loader products shuffled randomly
+  // Show search results if active, otherwise merge loaderProducts + botProducts and shuffle
   const productsList = useMemo(() => {
-    const base = searchResults !== null ? searchResults : loaderProducts;
-    if (searchResults !== null) return base; // keep search results in order
-    // Shuffle so new products appear at random positions, not always at top
-    return [...base].sort((a: any, b: any) => {
+    if (searchResults !== null) return searchResults;
+    // Merge CJ My Products + bot products, deduplicate by id
+    const combined = [...loaderProducts, ...botProducts];
+    const seen = new Set<string>();
+    const deduped = combined.filter((p: any) => {
+      if (seen.has(String(p.id))) return false;
+      seen.add(String(p.id));
+      return true;
+    });
+    // Shuffle so new products appear at random positions
+    return [...deduped].sort((a: any, b: any) => {
       const ah = (a.id || "").split("").reduce((s: number, c: string) => s + c.charCodeAt(0), 0);
       const bh = (b.id || "").split("").reduce((s: number, c: string) => s + c.charCodeAt(0), 0);
       return (ah % 31) - (bh % 31);
     });
-  }, [searchResults, loaderProducts]);
+  }, [searchResults, loaderProducts, botProducts]);
   const isLoading = isSearching;
 
   return (
