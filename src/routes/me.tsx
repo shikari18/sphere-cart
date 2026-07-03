@@ -74,7 +74,7 @@ function MePage() {
           </div>
           <div>
             <p className="text-lg font-extrabold">Emmanuel Ogar</p>
-            <p className="text-xs text-white/85">Zova Member · Gold</p>
+            <p className="text-xs text-white/85">Dova Member · Gold</p>
             <div className="mt-1.5 flex items-center gap-1.5">
               <span className="text-[10px] bg-white/20 rounded-full px-2 py-0.5 font-semibold">🏆 Level 3</span>
               <span className="text-[10px] bg-white/20 rounded-full px-2 py-0.5 font-semibold">🔥 12 day streak</span>
@@ -133,7 +133,7 @@ function MePage() {
           </div>
           <div className="flex-1">
             <p className="text-sm font-bold">Invite friends, earn $10</p>
-            <p className="text-[11px] text-muted-foreground">For every friend who joins Zova</p>
+            <p className="text-[11px] text-muted-foreground">For every friend who joins Dova</p>
           </div>
           <button className="text-xs font-bold text-flame">Invite ›</button>
         </div>
@@ -155,7 +155,7 @@ function MePage() {
         </div>
       </section>
 
-      <p className="text-center text-[10px] text-muted-foreground mt-6">Zova · v1.0 · Made with ♡</p>
+      <p className="text-center text-[10px] text-muted-foreground mt-6">Dova · v1.0 · Made with ♡</p>
 
       <BottomNav />
     </PhoneShell>
