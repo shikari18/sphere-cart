@@ -15,38 +15,38 @@ type CheckoutStep = "cart" | "shipping" | "submitting" | "success" | "error";
 
 function CartPage() {
   const { items, removeItem, updateQty, clearCart, count } = useCart();
-  const { user, isLoggedIn } = useAuth();
+  const { isLoggedIn, profile } = useAuth();
   const navigate = useNavigate();
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [checkoutStep, setCheckoutStep] = useState<CheckoutStep>("cart");
   const [orderError, setOrderError] = useState("");
   const [placedOrderId, setPlacedOrderId] = useState("");
+  const [useSavedAddress, setUseSavedAddress] = useState(true);
 
-  // Shipping Form State — pre-filled from user profile
+  // Shipping Form State — pre-filled from profile
   const [shipping, setShipping] = useState({
-    customerName: user?.name || "",
-    email: user?.email || "",
-    phone: user?.phone || "",
+    customerName: profile?.name || "",
+    email: profile?.email || "",
+    phone: profile?.phone || "",
     countryCode: "GH",
     province: "",
     city: "",
-    address: user?.address || "",
+    address: profile?.address || "",
     address2: "",
     zip: "",
   });
 
-  // Update shipping when user logs in
   useEffect(() => {
-    if (user) {
+    if (profile) {
       setShipping((s) => ({
         ...s,
-        customerName: user.name || s.customerName,
-        email: user.email || s.email,
-        phone: user.phone || s.phone,
-        address: user.address || s.address,
+        customerName: profile.name || s.customerName,
+        email: profile.email || s.email,
+        phone: profile.phone || s.phone,
+        address: profile.address || s.address,
       }));
     }
-  }, [user]);
+  }, [profile]);
 
   const toggle = (id: string) =>
     setChecked((c) => ({ ...c, [id]: !c[id] }));
@@ -193,8 +193,51 @@ function CartPage() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-bold text-foreground/80">Recipient Full Name</label>
+          {/* Saved address option */}
+          {profile?.address && (
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-bold text-foreground/80">Deliver to:</label>
+              <button
+                type="button"
+                onClick={() => {
+                  setUseSavedAddress(true);
+                  setShipping((s) => ({
+                    ...s,
+                    customerName: profile.name || s.customerName,
+                    email: profile.email || s.email,
+                    phone: profile.phone || s.phone,
+                    address: profile.address || s.address,
+                  }));
+                }}
+                className={`flex items-start gap-3 p-3 rounded-xl border text-left transition ${
+                  useSavedAddress ? "border-primary bg-primary/5" : "border-border bg-white"
+                }`}
+              >
+                <div className={`w-4 h-4 rounded-full border-2 mt-0.5 shrink-0 ${useSavedAddress ? "border-primary bg-primary" : "border-muted-foreground"}`} />
+                <div>
+                  <p className="text-xs font-bold">{profile.name}</p>
+                  <p className="text-xs text-muted-foreground">{profile.address}</p>
+                  {profile.phone && <p className="text-xs text-muted-foreground">{profile.phone}</p>}
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setUseSavedAddress(false)}
+                className={`flex items-center gap-3 p-3 rounded-xl border text-left transition ${
+                  !useSavedAddress ? "border-primary bg-primary/5" : "border-border bg-white"
+                }`}
+              >
+                <div className={`w-4 h-4 rounded-full border-2 shrink-0 ${!useSavedAddress ? "border-primary bg-primary" : "border-muted-foreground"}`} />
+                <p className="text-xs font-semibold">Use a different address</p>
+              </button>
+            </div>
+          )}
+
+          {/* Manual fields — shown when not using saved address or no saved address */}
+          {(!profile?.address || !useSavedAddress) && (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-foreground/80">Recipient Full Name</label>
             <input
               type="text"
               required
@@ -306,6 +349,8 @@ function CartPage() {
               placeholder="e.g. Apt 4B"
             />
           </div>
+            </>
+          )}
 
           {/* Place Order CTA */}
           <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md z-50 px-4 pb-4">

@@ -1,81 +1,154 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import {
+  createContext, useContext, useState, useEffect, type ReactNode,
+} from "react";
+import {
+  auth, googleProvider, db,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInWithPopup,
+  firebaseSignOut,
+  onAuthStateChanged,
+  saveUserProfile,
+  getUserProfile,
+  type UserProfile,
+  type User,
+} from "@/lib/firebase";
+import { OAuthProvider } from "firebase/auth";
 
-export type AuthUser = {
-  name: string;
-  email: string;
-  phone: string;
-  address: string;
-};
+export type { UserProfile };
 
 type AuthContextType = {
-  user: AuthUser | null;
-  signUp: (data: AuthUser & { password: string }) => string | null;
-  signIn: (email: string, password: string) => string | null;
-  signOut: () => void;
+  firebaseUser: User | null;
+  profile: UserProfile | null;
   isLoggedIn: boolean;
+  isLoading: boolean;
+  needsOnboarding: boolean;
+  signUpWithEmail: (email: string, password: string) => Promise<string | null>;
+  signInWithEmail: (email: string, password: string) => Promise<string | null>;
+  signInWithGoogle: () => Promise<string | null>;
+  signInWithApple: () => Promise<string | null>;
+  signOut: () => Promise<void>;
+  completeOnboarding: (data: { name: string; phone: string; address: string }) => Promise<void>;
+  updateProfile: (data: Partial<UserProfile>) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-const STORAGE_KEY = "mbshop_users";
-const SESSION_KEY = "mbshop_session";
-
-function getUsers(): Record<string, AuthUser & { password: string }> {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveUsers(users: Record<string, AuthUser & { password: string }>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(users));
-}
-
-function getSession(): AuthUser | null {
-  try {
-    const s = localStorage.getItem(SESSION_KEY);
-    return s ? JSON.parse(s) : null;
-  } catch {
-    return null;
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(() => getSession());
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const signUp = (data: AuthUser & { password: string }): string | null => {
-    const users = getUsers();
-    if (users[data.email.toLowerCase()]) {
-      return "An account with this email already exists.";
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      setFirebaseUser(user);
+      if (user) {
+        const p = await getUserProfile(user.uid);
+        setProfile(p);
+      } else {
+        setProfile(null);
+      }
+      setIsLoading(false);
+    });
+    return unsub;
+  }, []);
+
+  const signUpWithEmail = async (email: string, password: string): Promise<string | null> => {
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      // Create bare profile — onboarding will fill the rest
+      await saveUserProfile(cred.user.uid, {
+        uid: cred.user.uid,
+        email: cred.user.email || email,
+        name: "",
+        phone: "",
+        address: "",
+        onboardingComplete: false,
+      });
+      return null;
+    } catch (e: any) {
+      return friendlyError(e.code);
     }
-    const { password, ...profile } = data;
-    users[data.email.toLowerCase()] = { ...profile, password };
-    saveUsers(users);
-    const sessionUser: AuthUser = profile;
-    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
-    setUser(sessionUser);
-    return null; // no error
   };
 
-  const signIn = (email: string, password: string): string | null => {
-    const users = getUsers();
-    const account = users[email.toLowerCase()];
-    if (!account) return "No account found with this email.";
-    if (account.password !== password) return "Incorrect password.";
-    const { password: _, ...profile } = account;
-    localStorage.setItem(SESSION_KEY, JSON.stringify(profile));
-    setUser(profile);
-    return null;
+  const signInWithEmail = async (email: string, password: string): Promise<string | null> => {
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      return null;
+    } catch (e: any) {
+      return friendlyError(e.code);
+    }
   };
 
-  const signOut = () => {
-    localStorage.removeItem(SESSION_KEY);
-    setUser(null);
+  const signInWithGoogle = async (): Promise<string | null> => {
+    try {
+      const cred = await signInWithPopup(auth, googleProvider);
+      const existing = await getUserProfile(cred.user.uid);
+      if (!existing) {
+        await saveUserProfile(cred.user.uid, {
+          uid: cred.user.uid,
+          email: cred.user.email || "",
+          name: cred.user.displayName || "",
+          phone: "",
+          address: "",
+          onboardingComplete: false,
+        });
+      }
+      return null;
+    } catch (e: any) {
+      return friendlyError(e.code);
+    }
   };
+
+  const signInWithApple = async (): Promise<string | null> => {
+    try {
+      const appleProvider = new OAuthProvider("apple.com");
+      appleProvider.addScope("email");
+      appleProvider.addScope("name");
+      const cred = await signInWithPopup(auth, appleProvider);
+      const existing = await getUserProfile(cred.user.uid);
+      if (!existing) {
+        await saveUserProfile(cred.user.uid, {
+          uid: cred.user.uid,
+          email: cred.user.email || "",
+          name: cred.user.displayName || "",
+          phone: "",
+          address: "",
+          onboardingComplete: false,
+        });
+      }
+      return null;
+    } catch (e: any) {
+      return friendlyError(e.code);
+    }
+  };
+
+  const signOut = async () => {
+    await firebaseSignOut(auth);
+    setProfile(null);
+  };
+
+  const completeOnboarding = async (data: { name: string; phone: string; address: string }) => {
+    if (!firebaseUser) return;
+    const updated: Partial<UserProfile> = { ...data, onboardingComplete: true };
+    await saveUserProfile(firebaseUser.uid, updated);
+    setProfile((p) => p ? { ...p, ...updated } : null);
+  };
+
+  const updateProfile = async (data: Partial<UserProfile>) => {
+    if (!firebaseUser) return;
+    await saveUserProfile(firebaseUser.uid, data);
+    setProfile((p) => p ? { ...p, ...data } : null);
+  };
+
+  const needsOnboarding = !!firebaseUser && profile !== null && !profile.onboardingComplete;
 
   return (
-    <AuthContext.Provider value={{ user, signUp, signIn, signOut, isLoggedIn: !!user }}>
+    <AuthContext.Provider value={{
+      firebaseUser, profile, isLoggedIn: !!firebaseUser, isLoading,
+      needsOnboarding, signUpWithEmail, signInWithEmail, signInWithGoogle,
+      signInWithApple, signOut, completeOnboarding, updateProfile,
+    }}>
       {children}
     </AuthContext.Provider>
   );
@@ -85,4 +158,19 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
   return ctx;
+}
+
+function friendlyError(code: string): string {
+  switch (code) {
+    case "auth/email-already-in-use": return "An account with this email already exists.";
+    case "auth/invalid-email": return "Please enter a valid email address.";
+    case "auth/weak-password": return "Password must be at least 6 characters.";
+    case "auth/user-not-found": return "No account found with this email.";
+    case "auth/wrong-password": return "Incorrect password. Please try again.";
+    case "auth/invalid-credential": return "Incorrect email or password.";
+    case "auth/popup-closed-by-user": return "Sign-in was cancelled.";
+    case "auth/cancelled-popup-request": return "Sign-in was cancelled.";
+    case "auth/network-request-failed": return "Network error. Please check your connection.";
+    default: return "Something went wrong. Please try again.";
+  }
 }
