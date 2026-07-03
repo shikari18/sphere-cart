@@ -99,31 +99,45 @@ function normalizeCjItem(item: any, payloadCategory?: string) {
 }
 
 // Server function to fetch products from CJ Dropshipping
-// Always pulls from the full CJ general catalog — no manual "My Products" curation needed
+// Fetches live from CJ My Products — any product added/removed on CJ reflects immediately
 export const fetchCjProducts = createServerFn({ method: "GET" })
   .handler(async ({ data }: { data?: { category?: string; search?: string; page?: number; size?: number; bypassLocal?: boolean } }) => {
     const payload = data || {};
     const token = await getAccessToken();
     const pageNum = payload.page || 1;
     const pageSize = payload.size || 24;
-    const keyWord = payload.search || payload.category || "";
+    const keyWord = (payload.search || payload.category || "").toLowerCase();
 
     try {
       console.log("[fetchCjProducts] payload:", payload);
 
-      // ── Always fetch from CJ general catalog ─────────────────────────────────
-      // This gives access to all CJ products without needing to add them to My Products
-      const genUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${pageNum}&pageSize=${pageSize}${keyWord ? `&keyWord=${encodeURIComponent(keyWord)}` : ""}`;
-      console.log("[fetchCjProducts] Fetching general catalog:", genUrl);
-      const genRes = await fetch(genUrl, { headers: { "CJ-Access-Token": token } });
-      const genJson = await genRes.json();
+      // Fetch live from CJ My Products
+      const myProdRes = await fetch(
+        `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=1&pageSize=200`,
+        { headers: { "CJ-Access-Token": token } }
+      );
+      const myProdJson = await myProdRes.json();
+      console.log("[fetchCjProducts] My Products response code:", myProdJson.code, "count:", myProdJson.data?.content?.length || 0);
 
       let rawList: any[] = [];
-      if (genJson.code === 200) {
-        const d = genJson.data;
-        rawList = Array.isArray(d) ? (d[0]?.list || []) : (d?.list || []);
+      if (myProdJson.code === 200 && myProdJson.data?.content?.length > 0) {
+        rawList = myProdJson.data.content;
       }
-      console.log("[fetchCjProducts] General catalog count:", rawList.length);
+
+      // Filter by keyword/category if provided
+      if (keyWord && rawList.length > 0) {
+        rawList = rawList.filter((item: any) => {
+          const norm = normalizeCjItem(item);
+          const matchesKeyword = norm.title.toLowerCase().includes(keyWord) || norm.sku.toLowerCase().includes(keyWord);
+          const matchesCategory = !payload.category || norm.category.toLowerCase() === payload.category.toLowerCase();
+          return matchesKeyword && matchesCategory;
+        });
+      }
+
+      // Paginate
+      const start = (pageNum - 1) * pageSize;
+      rawList = rawList.slice(start, start + pageSize);
+      console.log("[fetchCjProducts] Final count:", rawList.length);
 
       return rawList.map((item: any) => {
         const norm = normalizeCjItem(item, payload.category);
