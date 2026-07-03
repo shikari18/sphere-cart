@@ -562,19 +562,29 @@ export const saveBotProduct = createServerFn({ method: "POST" })
     return { success: true };
   });
 
-// ── Auto-Bot: fetches My Products list (no Firestore write, just returns data) ─
+// ── Bot: fetch My Products across multiple pages ──────────────────────────────
 export const fetchBotCandidates = createServerFn({ method: "GET" })
   .handler(async () => {
     const token = await getAccessToken();
-    const myProdRes = await fetch(
-      `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=1&pageSize=200`,
-      { headers: { "CJ-Access-Token": token } }
-    );
-    const myProdJson = await myProdRes.json();
-    if (myProdJson.code !== 200) throw new Error(myProdJson.message || "Failed to fetch My Products");
-    const items: any[] = myProdJson.data?.content || [];
+    const allItems: any[] = [];
 
-    return items.map((item: any) => {
+    // Fetch up to 5 pages (200 products per page = 1000 total)
+    for (let page = 1; page <= 5; page++) {
+      const res = await fetch(
+        `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=${page}&pageSize=200`,
+        { headers: { "CJ-Access-Token": token } }
+      );
+      const json = await res.json();
+      if (json.code !== 200) break;
+      const content: any[] = json.data?.content || [];
+      if (content.length === 0) break;
+      allItems.push(...content);
+      if (content.length < 200) break; // no more pages
+    }
+
+    if (allItems.length === 0) throw new Error("No products found in your CJ My Products list. Add products on CJ first.");
+
+    return allItems.map((item: any) => {
       const norm = normalizeCjItem(item);
       const id = String(norm.id);
       const rawSellPrice = item.sellPrice || "10.0";

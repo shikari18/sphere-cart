@@ -330,6 +330,76 @@ function ProductsTab() {
   );
 }
 
+// ── Manual Add Product by CJ Product ID ──────────────────────────────────────
+function ManualAddProduct() {
+  const [pid, setPid] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const handleAdd = async () => {
+    if (!pid.trim()) return;
+    setLoading(true);
+    setMsg("");
+    try {
+      // Fetch product details from CJ by PID
+      const res = await fetch(`/api/cj-product?pid=${pid.trim()}`);
+      // Since we don't have a direct endpoint, build from variant data
+      const { fetchCjVariants } = await import("@/lib/cj-api");
+      const variants = await fetchCjVariants({ data: { pid: pid.trim() } });
+      if (!variants || variants.length === 0) {
+        setMsg("Product not found. Make sure it's in your CJ My Products list.");
+        setLoading(false);
+        return;
+      }
+      const v = variants[0];
+      const priceGHC = parseFloat((v.variantSellPrice * 1.15).toFixed(2));
+      const product = {
+        id: v.pid,
+        title: v.variantNameEn,
+        image: v.variantImage,
+        price: priceGHC,
+        original: parseFloat((priceGHC * 2).toFixed(2)),
+        category: "Fashion",
+        sku: v.variantSku,
+        badge: "-15%",
+        addedAt: new Date().toISOString(),
+        addedDate: new Date().toISOString().slice(0, 10),
+      };
+      await setDoc(doc(db, "bot_products", String(v.pid)), product);
+      setMsg(`✓ Added "${v.variantNameEn.slice(0, 40)}..." to your store`);
+      setPid("");
+    } catch (e: any) {
+      setMsg("Failed: " + (e.message || "Unknown error"));
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="bg-white rounded-2xl p-4 border border-border/60 shadow-sm">
+      <h3 className="text-sm font-bold mb-1">Add Single Product</h3>
+      <p className="text-xs text-muted-foreground mb-3">Paste a CJ Product ID to add it directly</p>
+      <div className="flex gap-2">
+        <input
+          value={pid}
+          onChange={(e) => setPid(e.target.value)}
+          placeholder="CJ Product ID (e.g. 1234567890)"
+          className="flex-1 rounded-xl border border-border px-3 py-2.5 text-sm outline-none focus:border-primary"
+        />
+        <button
+          onClick={handleAdd}
+          disabled={loading || !pid.trim()}
+          className="bg-primary text-white text-sm font-bold px-4 rounded-xl disabled:opacity-50 hover:opacity-90 transition"
+        >
+          {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Add"}
+        </button>
+      </div>
+      {msg && (
+        <p className={`text-xs mt-2 font-semibold ${msg.startsWith("✓") ? "text-green-600" : "text-destructive"}`}>{msg}</p>
+      )}
+    </div>
+  );
+}
+
 // ── Bot Tab ───────────────────────────────────────────────────────────────────
 function BotTab() {
   const [running, setRunning] = useState(false);
@@ -484,6 +554,9 @@ function BotTab() {
           {running ? `Importing... (${progress.current}/${progress.total})` : "Run Bot Now"}
         </button>
       </div>
+
+      {/* Manual add by CJ Product ID */}
+      <ManualAddProduct />
 
       {/* Recent bot products */}
       <div>
