@@ -1,17 +1,36 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { ChevronLeft, MoreVertical, Check, Trash2, Clock, MapPin, ShoppingCart } from "lucide-react";
+import { ChevronLeft, MoreVertical, Check, Trash2, Clock, MapPin, ShoppingCart, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { PhoneShell } from "@/components/PhoneShell";
 import { BottomNav } from "@/components/BottomNav";
 import { useCart } from "@/hooks/use-cart";
+import { createCjOrder } from "@/lib/cj-api";
 
 export const Route = createFileRoute("/cart")({
   component: CartPage,
 });
 
+type CheckoutStep = "cart" | "shipping" | "submitting" | "success" | "error";
+
 function CartPage() {
-  const { items, removeItem, updateQty, total, count } = useCart();
+  const { items, removeItem, updateQty, clearCart, count } = useCart();
   const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [checkoutStep, setCheckoutStep] = useState<CheckoutStep>("cart");
+  const [orderError, setOrderError] = useState("");
+  const [placedOrderId, setPlacedOrderId] = useState("");
+
+  // Shipping Form State
+  const [shipping, setShipping] = useState({
+    customerName: "Emmanuel Ogar",
+    email: "emmanuel@example.com",
+    phone: "+233541234567",
+    countryCode: "US",
+    province: "California",
+    city: "Los Angeles",
+    address: "1024 Westwood Blvd",
+    address2: "Apt 4B",
+    zip: "90024",
+  });
 
   const toggle = (id: string) =>
     setChecked((c) => ({ ...c, [id]: !c[id] }));
@@ -21,6 +40,268 @@ function CartPage() {
   const selected = items.filter((c) => checked[c.id] !== false);
   const selectedTotal = selected.reduce((s, c) => s + c.price * c.qty, 0);
   const savings = selected.reduce((s, c) => s + (c.original - c.price) * c.qty, 0);
+
+  const handleCheckoutSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCheckoutStep("submitting");
+    setOrderError("");
+
+    try {
+      // Map cart products to CJ Drop shipping variants
+      const orderProducts = selected.map((item) => {
+        // Fallback to item.id if no vid exists
+        return {
+          vid: item.vid || item.id,
+          quantity: item.qty,
+        };
+      });
+
+      const response = await createCjOrder({
+        customerName: shipping.customerName,
+        email: shipping.email,
+        phone: shipping.phone,
+        countryCode: shipping.countryCode,
+        province: shipping.province,
+        city: shipping.city,
+        address: shipping.address,
+        address2: shipping.address2 || undefined,
+        zip: shipping.zip,
+        products: orderProducts,
+      });
+
+      if (response.success) {
+        setPlacedOrderId(response.orderId);
+        clearCart();
+        setCheckoutStep("success");
+      } else {
+        throw new Error(response.message || "Failed to create order on CJ Dropshipping");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setOrderError(err.message || "Failed to submit order. Please try again.");
+      setCheckoutStep("error");
+    }
+  };
+
+  if (checkoutStep === "submitting") {
+    return (
+      <PhoneShell gradient={false}>
+        <div className="flex flex-col items-center justify-center min-h-[80vh] px-6 text-center">
+          <Loader2 className="w-16 h-16 animate-spin text-primary mb-6" />
+          <h2 className="text-xl font-extrabold mb-2">Processing Order</h2>
+          <p className="text-sm text-muted-foreground">
+            Submitting order details directly to CJ Dropshipping...
+          </p>
+        </div>
+      </PhoneShell>
+    );
+  }
+
+  if (checkoutStep === "success") {
+    return (
+      <PhoneShell gradient={false}>
+        <div className="flex flex-col items-center justify-center min-h-[80vh] px-6 text-center">
+          <CheckCircle2 className="w-20 h-20 text-emerald-500 mb-6 animate-bounce" />
+          <h2 className="text-2xl font-extrabold mb-2 text-emerald-600">Order Placed!</h2>
+          <p className="text-sm text-muted-foreground mb-6">
+            Your order was successfully pushed to CJ Dropshipping!
+          </p>
+          <div className="bg-secondary rounded-2xl p-4 w-full mb-8 border border-border/40">
+            <span className="text-xs text-muted-foreground block mb-1">CJ Order Number / ID</span>
+            <span className="font-mono font-bold text-foreground text-sm">{placedOrderId}</span>
+          </div>
+          <Link
+            to="/"
+            onClick={() => setCheckoutStep("cart")}
+            className="w-full bg-primary text-primary-foreground font-extrabold py-3.5 rounded-full hover:opacity-90 active:scale-[0.98] transition shadow-lg text-center"
+          >
+            Continue Shopping
+          </Link>
+        </div>
+      </PhoneShell>
+    );
+  }
+
+  if (checkoutStep === "error") {
+    return (
+      <PhoneShell gradient={false}>
+        <div className="flex flex-col items-center justify-center min-h-[80vh] px-6 text-center">
+          <XCircle className="w-20 h-20 text-destructive mb-6" />
+          <h2 className="text-2xl font-extrabold mb-2 text-destructive">Submission Failed</h2>
+          <p className="text-sm text-muted-foreground mb-6">
+            {orderError}
+          </p>
+          <div className="flex flex-col gap-3 w-full">
+            <button
+              onClick={() => setCheckoutStep("shipping")}
+              className="w-full bg-destructive text-white font-extrabold py-3.5 rounded-full hover:opacity-90 active:scale-[0.98] transition shadow-lg"
+            >
+              Try Again
+            </button>
+            <button
+              onClick={() => setCheckoutStep("cart")}
+              className="w-full bg-secondary text-foreground font-bold py-3.5 rounded-full hover:bg-secondary/80 active:scale-[0.98] transition"
+            >
+              Back to Cart
+            </button>
+          </div>
+        </div>
+      </PhoneShell>
+    );
+  }
+
+  if (checkoutStep === "shipping") {
+    return (
+      <PhoneShell gradient={false}>
+        {/* Header */}
+        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xl border-b border-border/60">
+          <div className="flex items-center gap-2 px-4 pt-5 pb-3">
+            <button
+              onClick={() => setCheckoutStep("cart")}
+              className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-black/5"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <span className="font-extrabold text-base">Shipping Details</span>
+          </div>
+        </header>
+
+        <form onSubmit={handleCheckoutSubmit} className="p-4 flex flex-col gap-4 pb-24">
+          <div className="bg-secondary/50 rounded-2xl p-4 border border-border/40 mb-2">
+            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-2">Order Summary</h3>
+            <div className="flex justify-between items-center text-sm font-semibold">
+              <span>Items ({selected.length})</span>
+              <span>₵{selectedTotal.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-foreground/80">Recipient Full Name</label>
+            <input
+              type="text"
+              required
+              value={shipping.customerName}
+              onChange={(e) => setShipping({ ...shipping, customerName: e.target.value })}
+              className="w-full rounded-xl border border-border px-3.5 py-2.5 text-sm bg-white outline-none focus:border-primary transition"
+              placeholder="e.g. Emmanuel Ogar"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-foreground/80">Email</label>
+              <input
+                type="email"
+                required
+                value={shipping.email}
+                onChange={(e) => setShipping({ ...shipping, email: e.target.value })}
+                className="w-full rounded-xl border border-border px-3.5 py-2.5 text-sm bg-white outline-none focus:border-primary transition"
+                placeholder="e.g. emmanuel@example.com"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-foreground/80">Phone Number</label>
+              <input
+                type="text"
+                required
+                value={shipping.phone}
+                onChange={(e) => setShipping({ ...shipping, phone: e.target.value })}
+                className="w-full rounded-xl border border-border px-3.5 py-2.5 text-sm bg-white outline-none focus:border-primary transition"
+                placeholder="e.g. +1234567890"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-foreground/80">Country Code</label>
+              <select
+                value={shipping.countryCode}
+                onChange={(e) => setShipping({ ...shipping, countryCode: e.target.value })}
+                className="w-full rounded-xl border border-border px-3.5 py-2.5 text-sm bg-white outline-none focus:border-primary transition"
+              >
+                <option value="US">United States (US)</option>
+                <option value="GH">Ghana (GH)</option>
+                <option value="GB">United Kingdom (GB)</option>
+                <option value="CA">Canada (CA)</option>
+                <option value="DE">Germany (DE)</option>
+                <option value="FR">France (FR)</option>
+              </select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-foreground/80">Province / State</label>
+              <input
+                type="text"
+                required
+                value={shipping.province}
+                onChange={(e) => setShipping({ ...shipping, province: e.target.value })}
+                className="w-full rounded-xl border border-border px-3.5 py-2.5 text-sm bg-white outline-none focus:border-primary transition"
+                placeholder="e.g. California"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-foreground/80">City</label>
+              <input
+                type="text"
+                required
+                value={shipping.city}
+                onChange={(e) => setShipping({ ...shipping, city: e.target.value })}
+                className="w-full rounded-xl border border-border px-3.5 py-2.5 text-sm bg-white outline-none focus:border-primary transition"
+                placeholder="e.g. Los Angeles"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-foreground/80">Zip / Postal Code</label>
+              <input
+                type="text"
+                required
+                value={shipping.zip}
+                onChange={(e) => setShipping({ ...shipping, zip: e.target.value })}
+                className="w-full rounded-xl border border-border px-3.5 py-2.5 text-sm bg-white outline-none focus:border-primary transition"
+                placeholder="e.g. 90024"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-foreground/80">Street Address</label>
+            <input
+              type="text"
+              required
+              value={shipping.address}
+              onChange={(e) => setShipping({ ...shipping, address: e.target.value })}
+              className="w-full rounded-xl border border-border px-3.5 py-2.5 text-sm bg-white outline-none focus:border-primary transition"
+              placeholder="e.g. 1024 Westwood Blvd"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold text-foreground/80">Address Line 2 (Optional)</label>
+            <input
+              type="text"
+              value={shipping.address2}
+              onChange={(e) => setShipping({ ...shipping, address2: e.target.value })}
+              className="w-full rounded-xl border border-border px-3.5 py-2.5 text-sm bg-white outline-none focus:border-primary transition"
+              placeholder="e.g. Apt 4B"
+            />
+          </div>
+
+          {/* Place Order CTA */}
+          <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md z-50 px-4 pb-4">
+            <button
+              type="submit"
+              className="w-full bg-flame hover:bg-flame/90 text-white font-extrabold text-base py-3.5 rounded-full shadow-2xl transition active:scale-[0.98]"
+            >
+              Submit Order to CJ Dropshipping (₵{selectedTotal.toFixed(2)})
+            </button>
+          </div>
+        </form>
+      </PhoneShell>
+    );
+  }
 
   return (
     <PhoneShell gradient={false}>
@@ -119,10 +400,14 @@ function CartPage() {
                       <span className="text-base font-extrabold text-flame">
                         ₵{c.price.toFixed(2)}
                       </span>
-                      <span className="text-[11px] text-muted-foreground line-through">₵{c.original.toFixed(2)}</span>
-                      <span className="text-[10px] bg-flame/10 text-flame border border-flame/30 rounded px-1 font-bold">
-                        {c.badge}
-                      </span>
+                      {c.original > c.price && (
+                        <span className="text-[11px] text-muted-foreground line-through">₵{c.original.toFixed(2)}</span>
+                      )}
+                      {c.badge && (
+                        <span className="text-[10px] bg-flame/10 text-flame border border-flame/30 rounded px-1 font-bold">
+                          {c.badge}
+                        </span>
+                      )}
                     </div>
                     <select
                       value={c.qty}
@@ -153,7 +438,9 @@ function CartPage() {
           <div className="mx-3 mb-3 rounded-full bg-black text-white flex items-center justify-between p-1.5 shadow-2xl">
             <div className="flex flex-col items-start pl-4 pr-2">
               <div className="flex items-baseline gap-1">
-                <span className="text-[10px] line-through text-white/60">₵{(selectedTotal + savings).toFixed(2)}</span>
+                {selectedTotal + savings > selectedTotal && (
+                  <span className="text-[10px] line-through text-white/60">₵{(selectedTotal + savings).toFixed(2)}</span>
+                )}
               </div>
               <div className="flex items-baseline gap-1 text-flame">
                 <span className="text-xs">₵</span>
@@ -161,9 +448,18 @@ function CartPage() {
                 <span className="text-[10px] text-flame/80">▲</span>
               </div>
             </div>
-            <button className="flex-1 mx-1 bg-flame hover:bg-flame/90 transition rounded-full py-2.5 text-center">
+            <button
+              onClick={() => {
+                if (selected.length === 0) return;
+                setCheckoutStep("shipping");
+              }}
+              disabled={selected.length === 0}
+              className="flex-1 mx-1 bg-flame hover:bg-flame/90 transition rounded-full py-2.5 text-center disabled:opacity-50"
+            >
               <p className="text-sm font-extrabold">Checkout ({selected.length})</p>
-              <p className="text-[10px] font-semibold text-white/90">Save ₵{savings.toFixed(2)} · 09:25:26</p>
+              {savings > 0 && (
+                <p className="text-[10px] font-semibold text-white/90">Save ₵{savings.toFixed(2)} · 09:25:26</p>
+              )}
             </button>
           </div>
         </div>

@@ -1,18 +1,46 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { ChevronLeft, Search } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { PhoneShell } from "@/components/PhoneShell";
 import { BottomNav } from "@/components/BottomNav";
 import { ProductCard } from "@/components/ProductCard";
-import { products, categoryList } from "@/data/products";
+import { categoryList } from "@/data/products";
+import { fetchCjProducts } from "@/lib/cj-api";
 
 export const Route = createFileRoute("/categories")({
   component: CategoriesPage,
 });
 
+function ProductCardSkeleton() {
+  return (
+    <div className="flex flex-col rounded-2xl overflow-hidden bg-white border border-border/60 shadow-[var(--shadow-card)] animate-pulse">
+      <div className="aspect-square bg-secondary/80" />
+      <div className="p-2.5 flex flex-col gap-2">
+        <div className="h-3.5 bg-secondary rounded w-5/6" />
+        <div className="h-3 bg-secondary rounded w-2/3" />
+        <div className="flex items-center justify-between gap-1 mt-1">
+          <div className="h-5 bg-secondary rounded w-16" />
+          <div className="w-7 h-7 rounded-full bg-secondary" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CategoriesPage() {
   const [active, setActive] = useState(categoryList[0].slug);
-  const list = products.filter((p) => p.category === active);
+  const [search, setSearch] = useState("");
+
+  // Query products dynamically from CJ based on selected category & search input
+  const { data: products = [], isLoading } = useQuery({
+    queryKey: ["cj-category-products", active, search],
+    queryFn: () => fetchCjProducts({ 
+      category: active, 
+      search: search || undefined, 
+      size: 20 
+    }),
+  });
 
   return (
     <PhoneShell>
@@ -24,7 +52,12 @@ function CategoriesPage() {
           </Link>
           <div className="flex-1 flex items-center gap-2 bg-secondary rounded-full px-3 py-2">
             <Search className="w-4 h-4 text-muted-foreground" />
-            <input placeholder="Search categories..." className="flex-1 bg-transparent outline-none text-sm placeholder:text-muted-foreground" />
+            <input 
+              placeholder="Search categories..." 
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="flex-1 bg-transparent outline-none text-sm placeholder:text-muted-foreground" 
+            />
           </div>
         </div>
       </header>
@@ -37,7 +70,10 @@ function CategoriesPage() {
             return (
               <button
                 key={c.slug}
-                onClick={() => setActive(c.slug)}
+                onClick={() => {
+                  setActive(c.slug);
+                  setSearch(""); // Reset search on category change
+                }}
                 className={`relative w-full flex flex-col items-center gap-1 py-4 text-[11px] font-semibold transition ${
                   isActive ? "bg-white text-primary" : "text-foreground/70"
                 }`}
@@ -60,11 +96,17 @@ function CategoriesPage() {
           </div>
 
           <div className="grid grid-cols-2 gap-2.5">
-            {list.map((p) => (
-              <ProductCard key={p.id} product={p} />
-            ))}
-            {list.length === 0 && (
-              <p className="col-span-2 text-center text-sm text-muted-foreground py-10">No products yet.</p>
+            {isLoading ? (
+              Array.from({ length: 6 }).map((_, idx) => (
+                <ProductCardSkeleton key={idx} />
+              ))
+            ) : (
+              products.map((p) => (
+                <ProductCard key={p.id} product={p} />
+              ))
+            )}
+            {!isLoading && products.length === 0 && (
+              <p className="col-span-2 text-center text-sm text-muted-foreground py-10">No products found.</p>
             )}
           </div>
         </main>

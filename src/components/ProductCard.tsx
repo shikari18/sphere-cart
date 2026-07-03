@@ -1,8 +1,10 @@
-import { useState } from "react";
-import { Star, ShoppingCart, X, ChevronLeft, Minus, Plus, Truck, Shield, RotateCcw } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Star, ShoppingCart, X, ChevronLeft, Minus, Plus, Truck, Shield, RotateCcw, Loader2 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import type { Product } from "@/data/products";
 import { useCart } from "@/hooks/use-cart";
+import { fetchCjVariants, type CJVariant } from "@/lib/cj-api";
 
 // ─── Product Detail Sheet (Temu-style) ───────────────────────────────────────
 
@@ -15,11 +17,49 @@ function ProductSheet({
 }) {
   const { addItem, items } = useCart();
   const [qty, setQty] = useState(1);
-  const cartItem = items.find((i) => i.id === product.id);
-  const discount = Math.round(((product.original - product.price) / product.original) * 100);
+  const [selectedVariant, setSelectedVariant] = useState<CJVariant | null>(null);
+
+  // Fetch variants from CJ Dropshipping API
+  const { data: variants = [], isLoading } = useQuery({
+    queryKey: ["cj-variants", product.id],
+    queryFn: () => fetchCjVariants({ pid: product.id }),
+    enabled: !!product.id,
+  });
+
+  // Automatically select the first variant when loaded
+  useEffect(() => {
+    if (variants.length > 0 && !selectedVariant) {
+      setSelectedVariant(variants[0]);
+    }
+  }, [variants, selectedVariant]);
+
+  // Determine current display fields based on selection
+  const displayImage = selectedVariant?.variantImage || product.image;
+  const displayTitle = selectedVariant 
+    ? `${product.title} (${selectedVariant.variantNameEn})`
+    : product.title;
+  const displaySku = selectedVariant?.variantSku || product.sku;
+  
+  // CJ prices are USD. Convert to GHC with rate of 15
+  const rawPriceUSD = selectedVariant?.variantSellPrice || (product.price / 15.0);
+  const displayPrice = rawPriceUSD * 15.0;
+  
+  const discount = Math.round(((product.original - displayPrice) / product.original) * 100);
+
+  const cartItem = items.find((i) => i.id === (selectedVariant ? `${product.id}-${selectedVariant.vid}` : product.id));
 
   const handleAdd = () => {
-    for (let i = 0; i < qty; i++) addItem(product);
+    const productToAdd = {
+      ...product,
+      id: selectedVariant ? `${product.id}-${selectedVariant.vid}` : product.id,
+      vid: selectedVariant ? selectedVariant.vid : undefined,
+      title: displayTitle,
+      image: displayImage,
+      price: parseFloat(displayPrice.toFixed(2)),
+      sku: displaySku,
+    };
+    for (let i = 0; i < qty; i++) addItem(productToAdd);
+    onClose();
   };
 
   return (
@@ -41,12 +81,12 @@ function ProductSheet({
           <div className="w-9" />
         </div>
 
-        <div className="overflow-y-auto max-h-[88vh] pb-32">
+        <div className="overflow-y-auto max-h-[80vh] pb-32">
           {/* Hero image */}
           <div className="relative aspect-[4/3] bg-secondary overflow-hidden mx-4 rounded-2xl">
             <img
-              src={product.image}
-              alt={product.title}
+              src={displayImage}
+              alt={displayTitle}
               className="w-full h-full object-cover"
             />
             {product.badge && (
@@ -70,21 +110,25 @@ function ProductSheet({
               <span className="text-[11px] text-emerald-600 font-semibold">· Arrives in 7 days</span>
             </div>
 
-            <h2 className="text-base font-bold leading-snug text-foreground">{product.title}</h2>
+            <h2 className="text-base font-bold leading-snug text-foreground">{displayTitle}</h2>
 
             {/* Price row */}
             <div className="flex items-baseline gap-2 mt-2">
-              <span className="text-2xl font-extrabold text-destructive">₵{product.price.toFixed(2)}</span>
-              <span className="text-sm text-muted-foreground line-through">₵{product.original.toFixed(2)}</span>
-              <span className="text-xs font-bold text-destructive bg-destructive/10 rounded px-1">
-                -{discount}% OFF
-              </span>
+              <span className="text-2xl font-extrabold text-destructive">₵{displayPrice.toFixed(2)}</span>
+              {product.original > displayPrice && (
+                <>
+                  <span className="text-sm text-muted-foreground line-through">₵{product.original.toFixed(2)}</span>
+                  <span className="text-xs font-bold text-destructive bg-destructive/10 rounded px-1">
+                    {discount > 0 ? `-${discount}% OFF` : "SALE"}
+                  </span>
+                </>
+              )}
             </div>
 
             {/* Rating row */}
             <div className="flex items-center gap-2 mt-2">
               <div className="flex items-center gap-0.5">
-                {[1,2,3,4,5].map((s) => (
+                {[1, 2, 3, 4, 5].map((s) => (
                   <Star
                     key={s}
                     className={`w-3.5 h-3.5 ${s <= Math.round(product.rating) ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground"}`}
@@ -95,6 +139,39 @@ function ProductSheet({
               <span className="text-xs text-muted-foreground">({product.reviews.toLocaleString()} reviews)</span>
               <span className="text-xs text-muted-foreground">· {product.sold}</span>
             </div>
+
+            {/* Variant Selector */}
+            {isLoading ? (
+              <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground bg-secondary/50 rounded-xl p-3">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span>Loading product options...</span>
+              </div>
+            ) : variants.length > 0 ? (
+              <div className="mt-4">
+                <span className="text-xs font-bold text-foreground/85 block mb-2">Style / Option:</span>
+                <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1">
+                  {variants.map((v) => {
+                    const isSelected = selectedVariant?.vid === v.vid;
+                    return (
+                      <button
+                        key={v.vid}
+                        onClick={() => setSelectedVariant(v)}
+                        className={`text-xs px-2.5 py-1.5 rounded-xl border font-medium flex items-center gap-1.5 transition ${
+                          isSelected
+                            ? "border-primary bg-primary/5 text-primary font-bold"
+                            : "border-border hover:bg-secondary text-foreground/80"
+                        }`}
+                      >
+                        {v.variantImage && (
+                          <img src={v.variantImage} alt="" className="w-5 h-5 rounded object-cover shrink-0" />
+                        )}
+                        <span className="max-w-[120px] truncate">{v.variantNameEn}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
 
             {/* Qty selector */}
             <div className="flex items-center gap-4 mt-4">
@@ -139,9 +216,10 @@ function ProductSheet({
         <div className="absolute bottom-0 inset-x-0 bg-white border-t border-border/60 px-4 py-3">
           <button
             onClick={handleAdd}
-            className="w-full bg-destructive hover:bg-destructive/90 active:scale-[0.98] transition text-white font-extrabold text-base py-3.5 rounded-full shadow-lg"
+            disabled={isLoading}
+            className="w-full bg-destructive hover:bg-destructive/90 active:scale-[0.98] transition text-white font-extrabold text-base py-3.5 rounded-full shadow-lg disabled:opacity-50"
           >
-            -{discount}% now! Add to cart!
+            {discount > 0 ? `-${discount}% now! Add to cart!` : "Add to cart!"}
           </button>
         </div>
       </div>
@@ -153,7 +231,6 @@ function ProductSheet({
 
 export function ProductCard({ product }: { product: Product }) {
   const [open, setOpen] = useState(false);
-  const { addItem } = useCart();
 
   return (
     <>
@@ -191,14 +268,16 @@ export function ProductCard({ product }: { product: Product }) {
               <span className="text-lg font-extrabold text-primary leading-none">
                 {product.price.toFixed(2)}
               </span>
-              <span className="text-[10px] text-muted-foreground line-through">
-                ₵{product.original.toFixed(2)}
-              </span>
+              {product.original > product.price && (
+                <span className="text-[10px] text-muted-foreground line-through">
+                  ₵{product.original.toFixed(2)}
+                </span>
+              )}
             </div>
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                addItem(product);
+                setOpen(true);
               }}
               aria-label="Add to cart"
               className="shrink-0 text-foreground hover:text-primary active:scale-90 transition"
