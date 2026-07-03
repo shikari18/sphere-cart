@@ -1,9 +1,10 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
-import { ChevronLeft, MoreVertical, Check, Trash2, Clock, MapPin, ShoppingCart, Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useState, useEffect } from "react";
+import { ChevronLeft, MoreVertical, Check, Trash2, Clock, MapPin, ShoppingCart, Loader2, CheckCircle2, XCircle, Lock } from "lucide-react";
 import { PhoneShell } from "@/components/PhoneShell";
 import { BottomNav } from "@/components/BottomNav";
 import { useCart } from "@/hooks/use-cart";
+import { useAuth } from "@/hooks/use-auth";
 import { createCjOrder } from "@/lib/cj-api";
 
 export const Route = createFileRoute("/cart")({
@@ -14,23 +15,38 @@ type CheckoutStep = "cart" | "shipping" | "submitting" | "success" | "error";
 
 function CartPage() {
   const { items, removeItem, updateQty, clearCart, count } = useCart();
+  const { user, isLoggedIn } = useAuth();
+  const navigate = useNavigate();
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [checkoutStep, setCheckoutStep] = useState<CheckoutStep>("cart");
   const [orderError, setOrderError] = useState("");
   const [placedOrderId, setPlacedOrderId] = useState("");
 
-  // Shipping Form State
+  // Shipping Form State — pre-filled from user profile
   const [shipping, setShipping] = useState({
-    customerName: "Emmanuel Ogar",
-    email: "emmanuel@example.com",
-    phone: "+233541234567",
-    countryCode: "US",
-    province: "California",
-    city: "Los Angeles",
-    address: "1024 Westwood Blvd",
-    address2: "Apt 4B",
-    zip: "90024",
+    customerName: user?.name || "",
+    email: user?.email || "",
+    phone: user?.phone || "",
+    countryCode: "GH",
+    province: "",
+    city: "",
+    address: user?.address || "",
+    address2: "",
+    zip: "",
   });
+
+  // Update shipping when user logs in
+  useEffect(() => {
+    if (user) {
+      setShipping((s) => ({
+        ...s,
+        customerName: user.name || s.customerName,
+        email: user.email || s.email,
+        phone: user.phone || s.phone,
+        address: user.address || s.address,
+      }));
+    }
+  }, [user]);
 
   const toggle = (id: string) =>
     setChecked((c) => ({ ...c, [id]: !c[id] }));
@@ -450,19 +466,29 @@ function CartPage() {
                 <span className="text-[10px] text-flame/80">▲</span>
               </div>
             </div>
-            <button
-              onClick={() => {
-                if (selected.length === 0) return;
-                setCheckoutStep("shipping");
-              }}
-              disabled={selected.length === 0}
-              className="flex-1 mx-1 bg-flame hover:bg-flame/90 transition rounded-full py-2.5 text-center disabled:opacity-50"
-            >
-              <p className="text-sm font-extrabold">Checkout ({selected.length})</p>
-              {savings > 0 && (
-                <p className="text-[10px] font-semibold text-white/90">Save ₵{savings.toFixed(2)} · 09:25:26</p>
-              )}
-            </button>
+            {isLoggedIn ? (
+              <button
+                onClick={() => {
+                  if (selected.length === 0) return;
+                  setCheckoutStep("shipping");
+                }}
+                disabled={selected.length === 0}
+                className="flex-1 mx-1 bg-flame hover:bg-flame/90 transition rounded-full py-2.5 text-center disabled:opacity-50"
+              >
+                <p className="text-sm font-extrabold">Checkout ({selected.length})</p>
+                {savings > 0 && (
+                  <p className="text-[10px] font-semibold text-white/90">Save ₵{savings.toFixed(2)}</p>
+                )}
+              </button>
+            ) : (
+              <Link
+                to="/me"
+                className="flex-1 mx-1 bg-primary rounded-full py-2.5 text-center flex items-center justify-center gap-1.5"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <p className="text-sm font-extrabold">Sign in to checkout</p>
+              </Link>
+            )}
           </div>
         </div>
       )}
