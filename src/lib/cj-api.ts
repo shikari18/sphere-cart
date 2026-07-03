@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { productOverrides } from "@/data/product-overrides";
 
 const apiKey = "CJ5292255@api@b5fe6ac793314066801c38bc47fcab0c";
 let cachedToken: string | null = null;
@@ -72,28 +73,45 @@ export const fetchCjProducts = createServerFn(
         : (dataObj?.list || []);
 
       return list.map((item: any) => {
+        // Check if there is a custom override for this product ID or SKU
+        const override = productOverrides[item.id] || productOverrides[item.sku];
+
         // CJ prices are USD. Convert to GHC (₵) with a standard rate of 15
         const rate = 15.0;
         const priceUSD = parseFloat(item.sellPrice || "10.0");
-        const priceGHC = priceUSD * rate;
+        let priceGHC = priceUSD * rate;
         
         // Generate a random mockup discount (e.g. 55% to 78%)
         const discountRate = 0.5 + (Math.floor(item.id.slice(-2)) % 30) / 100;
-        const originalGHC = priceGHC / (1 - discountRate);
+        let originalGHC = priceGHC / (1 - discountRate);
+
+        // Apply overrides if present
+        let displayTitle = item.nameEn || item.name || "Dova Product";
+        let displayImage = item.bigImage || item.mainImage || "";
+
+        if (override) {
+          if (override.title) displayTitle = override.title;
+          if (override.image) displayImage = override.image;
+          if (override.price !== undefined) priceGHC = override.price;
+          if (override.originalPrice !== undefined) originalGHC = override.originalPrice;
+        }
 
         const rating = 4.3 + (Math.floor(item.id.slice(-3)) % 7) / 10;
         const reviews = 50 + (Math.floor(item.id.slice(-4)) % 2500);
         
+        const finalDiscount = Math.round(((originalGHC - priceGHC) / originalGHC) * 100);
+        const badge = finalDiscount > 0 ? `-${finalDiscount}%` : "";
+
         return {
           id: item.id,
-          title: item.nameEn || item.name || "Dova Product",
-          image: item.bigImage || item.mainImage || "",
+          title: displayTitle,
+          image: displayImage,
           price: parseFloat(priceGHC.toFixed(2)),
           original: parseFloat(originalGHC.toFixed(2)),
           sold: reviews > 1000 ? `${(reviews * 1.5 / 1000).toFixed(0)}K+ sold` : `${reviews} sold`,
           rating: parseFloat(rating.toFixed(1)),
           reviews,
-          badge: `-${Math.round(discountRate * 100)}%`,
+          badge,
           category: payload.category || "General",
           topRated: rating > 4.7,
           sku: item.sku,
@@ -122,14 +140,39 @@ export const fetchCjVariants = createServerFn(
       }
 
       const variants = json.data || [];
-      return variants.map((v: any) => ({
-        vid: v.vid,
-        pid: v.pid,
-        variantNameEn: v.variantNameEn || v.variantKey || "Default Variant",
-        variantImage: v.variantImage || v.image || "",
-        variantSku: v.variantSku || v.sku || "",
-        variantSellPrice: parseFloat((v.variantSellPrice || v.price || 0).toString()),
-      }));
+      return variants.map((v: any) => {
+        // Check for variant level or product level overrides
+        const override = productOverrides[v.vid] || productOverrides[v.variantSku] || productOverrides[v.pid];
+
+        let variantName = v.variantNameEn || v.variantKey || "Default Variant";
+        let variantImage = v.variantImage || v.image || "";
+        let variantPriceUSD = parseFloat((v.variantSellPrice || v.price || 0).toString());
+        let variantPriceGHC = variantPriceUSD * 15.0;
+
+        if (override) {
+          // If product level override has a custom title but variant name is generic, we can merge
+          if (override.title && (variantName === "Default Variant" || !variantName)) {
+            variantName = override.title;
+          }
+          // We can override variant image if a specific variant override exists
+          const specificVarOverride = productOverrides[v.vid] || productOverrides[v.variantSku];
+          if (specificVarOverride?.image) {
+            variantImage = specificVarOverride.image;
+          }
+          if (specificVarOverride?.price !== undefined) {
+            variantPriceGHC = specificVarOverride.price;
+          }
+        }
+
+        return {
+          vid: v.vid,
+          pid: v.pid,
+          variantNameEn: variantName,
+          variantImage: variantImage,
+          variantSku: v.variantSku || v.sku || "",
+          variantSellPrice: variantPriceGHC / 15.0, // Server function returns USD variantSellPrice, which is converted in ProductSheet
+        };
+      });
     } catch (error) {
       console.error("CJ Fetch Variants Error:", error);
       throw error;
