@@ -91,7 +91,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      // Favicon — all browsers
+      { rel: "icon", href: "/logo.png", type: "image/png" },
+      { rel: "shortcut icon", href: "/logo.png", type: "image/png" },
+      // Apple iPhone / iPad — home screen & Safari tab
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+      { rel: "apple-touch-icon", sizes: "180x180", href: "/apple-touch-icon.png" },
+      // Android / PWA
+      { rel: "icon", type: "image/png", sizes: "192x192", href: "/icon-192.png" },
+      { rel: "icon", type: "image/png", sizes: "512x512", href: "/icon-512.png" },
     ],
   }),
   shellComponent: RootShell,
