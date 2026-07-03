@@ -553,24 +553,25 @@ export const adminGetCjProducts = createServerFn({ method: "GET" })
     });
   });
 
-// ── Auto-Bot: fetches products from CJ catalog and saves to Firestore ────────
+// ── Auto-Bot: fetches from CJ My Products and saves to Firestore ─────────────
 
 export const runCjAutoBot = createServerFn({ method: "POST" })
   .handler(async () => {
     const token = await getAccessToken();
 
-    // Fetch 70 products from the CJ general catalog (listV2 endpoint)
-    const catalogRes = await fetch(
-      `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=1&pageSize=70`,
+    // Fetch all My Products (up to 200)
+    const myProdRes = await fetch(
+      `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=1&pageSize=200`,
       { headers: { "CJ-Access-Token": token } }
     );
-    const catalogJson = await catalogRes.json();
+    const myProdJson = await myProdRes.json();
 
-    if (catalogJson.code !== 200) {
-      throw new Error(catalogJson.message || "Failed to fetch CJ catalog products");
+    if (myProdJson.code !== 200) {
+      throw new Error(myProdJson.message || "Failed to fetch My Products from CJ");
     }
 
-    const items: any[] = catalogJson.data?.list || catalogJson.data?.content || [];
+    const items: any[] = myProdJson.data?.content || [];
+    if (items.length === 0) throw new Error("No products found in your CJ My Products list.");
 
     const { db, doc, setDoc, collection, getDocs } = await getFirestoreAdmin();
 
@@ -588,12 +589,15 @@ export const runCjAutoBot = createServerFn({ method: "POST" })
       if (!id || existingIds.has(id)) continue;
 
       // Parse sell price, convert USD → GHC (×15), add 15% markup
-      const rawSellPrice = item.sellPrice || item.price || "10.0";
+      const rawSellPrice = item.sellPrice || "10.0";
       const priceUSDStr = rawSellPrice.toString().split("-")[0].trim();
       const priceUSD = parseFloat(priceUSDStr);
       const costGHC = isNaN(priceUSD) ? 15 : priceUSD * 15;
       const priceGHC = parseFloat((costGHC * 1.15).toFixed(2));
       const originalGHC = parseFloat((priceGHC * 2).toFixed(2));
+
+      const discountSteps = [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70];
+      const badge = `-${discountSteps[parseInt(id.slice(-2), 16) % discountSteps.length]}%`;
 
       await setDoc(doc(db, "bot_products", id), {
         id,
@@ -603,6 +607,7 @@ export const runCjAutoBot = createServerFn({ method: "POST" })
         original: originalGHC,
         category: norm.category,
         sku: norm.sku,
+        badge,
         addedAt: now.toISOString(),
         addedDate: todayStr,
       });
