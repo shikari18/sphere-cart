@@ -30,6 +30,8 @@ async function writeLocalProducts(products: any[]) {
 }
 
 
+// Rotate through API keys — tries each until one works
+async function getAccessToken(): Promise<string> {
   for (const key of apiKeys) {
     try {
       const response = await fetch("https://developers.cjdropshipping.com/api2.0/v1/authentication/getAccessToken", {
