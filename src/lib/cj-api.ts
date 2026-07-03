@@ -99,57 +99,31 @@ function normalizeCjItem(item: any, payloadCategory?: string) {
 }
 
 // Server function to fetch products from CJ Dropshipping
-// Priority: 1. CJ My Products (live)  2. General catalog fallback
+// Always pulls from the full CJ general catalog — no manual "My Products" curation needed
 export const fetchCjProducts = createServerFn({ method: "GET" })
   .handler(async ({ data }: { data?: { category?: string; search?: string; page?: number; size?: number; bypassLocal?: boolean } }) => {
     const payload = data || {};
     const token = await getAccessToken();
     const pageNum = payload.page || 1;
     const pageSize = payload.size || 24;
-    const keyWord = (payload.search || payload.category || "").toLowerCase();
+    const keyWord = payload.search || payload.category || "";
 
     try {
       console.log("[fetchCjProducts] payload:", payload);
 
-      // ── 1. CJ My Products — always fetched live from CJ dashboard ────────────
-      // This ensures any product added on CJ appears immediately without manual import
-      let rawList: any[] = [];
-      const myProductUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/myProduct/query?pageNum=1&pageSize=200`;
-      console.log("[fetchCjProducts] Fetching CJ myProduct list from:", myProductUrl);
-      const myProdRes = await fetch(
-        myProductUrl,
-        { headers: { "CJ-Access-Token": token } }
-      );
-      const myProdJson = await myProdRes.json();
-      console.log("[fetchCjProducts] CJ myProduct response code:", myProdJson.code, "message:", myProdJson.message);
-      if (myProdJson.code === 200 && myProdJson.data?.content?.length > 0) {
-        rawList = myProdJson.data.content;
-      }
-      console.log("[fetchCjProducts] CJ myProduct live count:", rawList.length);
+      // ── Always fetch from CJ general catalog ─────────────────────────────────
+      // This gives access to all CJ products without needing to add them to My Products
+      const genUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${pageNum}&pageSize=${pageSize}${keyWord ? `&keyWord=${encodeURIComponent(keyWord)}` : ""}`;
+      console.log("[fetchCjProducts] Fetching general catalog:", genUrl);
+      const genRes = await fetch(genUrl, { headers: { "CJ-Access-Token": token } });
+      const genJson = await genRes.json();
 
-      // ── 2. General catalog fallback if My Products is empty ───────────────────
-      if (rawList.length === 0) {
-        const genUrl = `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${pageNum}&pageSize=${pageSize}${keyWord ? `&keyWord=${encodeURIComponent(keyWord)}` : ""}`;
-        console.log("[fetchCjProducts] Fallback: fetching general catalog from:", genUrl);
-        const genRes = await fetch(genUrl, { headers: { "CJ-Access-Token": token } });
-        const genJson = await genRes.json();
-        if (genJson.code === 200) {
-          const d = genJson.data;
-          rawList = Array.isArray(d) ? (d[0]?.list || []) : (d?.list || []);
-        }
-        console.log("[fetchCjProducts] Fallback general catalog count:", rawList.length);
-      } else {
-        // Filter and paginate My Products
-        rawList = rawList.filter((item: any) => {
-          const norm = normalizeCjItem(item);
-          const matchesKeyword = !keyWord || norm.title.toLowerCase().includes(keyWord) || norm.sku.toLowerCase().includes(keyWord);
-          const matchesCategory = !payload.category || norm.category.toLowerCase() === payload.category.toLowerCase();
-          return matchesKeyword && matchesCategory;
-        });
-        console.log("[fetchCjProducts] Filtered myProduct count:", rawList.length);
-        const start = (pageNum - 1) * pageSize;
-        rawList = rawList.slice(start, start + pageSize);
+      let rawList: any[] = [];
+      if (genJson.code === 200) {
+        const d = genJson.data;
+        rawList = Array.isArray(d) ? (d[0]?.list || []) : (d?.list || []);
       }
+      console.log("[fetchCjProducts] General catalog count:", rawList.length);
 
       return rawList.map((item: any) => {
         const norm = normalizeCjItem(item, payload.category);
