@@ -1,52 +1,76 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { fetchBotByCategory, saveBotProducts } from "@/lib/cj-api";
-import { collection, doc, setDoc, getDocs } from "firebase/firestore";
+import { fetchBotByCategory } from "@/lib/cj-api";
+import { doc, setDoc, getDoc, collection, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
-// This route runs the bot automatically when visited
-// Cron-job.org visits: https://shopping-9ln6.onrender.com/bot-run?secret=mbshop_bot_2024&cat=Gaming&page=1
+// Visited by cron-job.org — imports ALL products from a full category at once
+// URL: /bot-run?secret=mbshop_bot_2024&cat=Gaming
 export const Route = createFileRoute("/bot-run")({
   component: BotRunPage,
 });
 
-const CATS = ["Gaming", "Fashion", "Electronics", "Beauty", "Shoes", "Bags", "Watches", "Home"];
-
 function BotRunPage() {
-  const [result, setResult] = useState("Running...");
+  const [lines, setLines] = useState<string[]>(["Starting full category import..."]);
+  const addLine = (line: string) => setLines(prev => [...prev, line]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const secret = params.get("secret");
     const cat = params.get("cat") || "Gaming";
-    const page = parseInt(params.get("page") || "1", 10);
 
     if (secret !== "mbshop_bot_2024") {
-      setResult("Unauthorized");
+      setLines(["Unauthorized"]);
       return;
     }
 
     const run = async () => {
-      try {
-        const candidates = await fetchBotByCategory({ data: { category: cat, amount: 10, page } });
-        const items = candidates as any[];
-        if (items.length > 0) {
-          await Promise.all(items.map(p => setDoc(doc(db, "bot_products", String(p.id)), p)));
-          setResult(`OK: added ${items.length} products from ${cat} page ${page}`);
-        } else {
-          setResult(`OK: no new products on ${cat} page ${page}`);
+      addLine(`Starting full import of category: ${cat}`);
+      let totalAdded = 0;
+
+      // Get existing product IDs to avoid duplicates
+      const existingSnap = await getDocs(collection(db, "bot_products"));
+      const existingIds = new Set(existingSnap.docs.map(d => d.id));
+      addLine(`Found ${existingIds.size} existing products`);
+
+      // Fetch ALL 52 pages for this category
+      for (let page = 1; page <= 52; page++) {
+        try {
+          const candidates = await fetchBotByCategory({ data: { category: cat, amount: 10, page } });
+          const items = (candidates as any[]).filter(p => !existingIds.has(String(p.id)));
+
+          if (items.length > 0) {
+            await Promise.all(items.map(p => {
+              existingIds.add(String(p.id));
+              return setDoc(doc(db, "bot_products", String(p.id)), p);
+            }));
+            totalAdded += items.length;
+            addLine(`Page ${page}: +${items.length} new products (total: ${totalAdded})`);
+          } else {
+            addLine(`Page ${page}: skipped (all duplicates)`);
+          }
+
+          // Small delay to avoid rate limiting
+          await new Promise(r => setTimeout(r, 300));
+        } catch (e: any) {
+          addLine(`Page ${page} error: ${e.message}`);
         }
-      } catch (e: any) {
-        setResult(`Error: ${e.message}`);
       }
+
+      // Save state
+      await setDoc(doc(db, "bot_status", `done_${cat}`), {
+        cat, totalAdded, completedAt: new Date().toISOString()
+      });
+
+      addLine(`✅ DONE: Added ${totalAdded} products from ${cat}`);
     };
 
     run();
   }, []);
 
   return (
-    <div style={{ fontFamily: "monospace", padding: 20 }}>
-      <pre>{result}</pre>
+    <div style={{ fontFamily: "monospace", padding: 20, background: "#000", color: "#0f0", minHeight: "100vh" }}>
+      {lines.map((line, i) => <div key={i}>{line}</div>)}
     </div>
   );
 }
