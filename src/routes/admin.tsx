@@ -400,12 +400,14 @@ function ManualAddProduct() {
 }
 
 // ── Bot Tab ───────────────────────────────────────────────────────────────────
+const BOT_CATS = ["Gaming", "Fashion", "Electronics", "Beauty", "Shoes", "Bags", "Watches", "Home"];
+
 function BotTab() {
   const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState({ current: 0, total: 0 });
-  const [done, setDone] = useState(false);
-  const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
+  const [added, setAdded] = useState(0);
   const [botProducts, setBotProducts] = useState<any[]>([]);
+  const runningRef = useState({ value: false })[0];
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -415,86 +417,85 @@ function BotTab() {
     return unsub;
   }, []);
 
-  const runBot = async () => {
+  const startBot = async () => {
+    runningRef.value = true;
     setRunning(true);
-    setDone(false);
-    setError("");
-    setProgress({ current: 0, total: 0 });
+    setAdded(0);
+    let total = 0;
 
-    const categories = ["Gaming", "Fashion", "Electronics", "Beauty", "Shoes", "Bags", "Watches", "Home", "dress", "watch"];
-    const perCategory = 50;
-    let totalSaved = 0;
+    // Get existing IDs to skip duplicates
+    const existingSnap = await getDocs(collection(db, "bot_products"));
+    const existingIds = new Set(existingSnap.docs.map(d => d.id));
 
-    try {
-      for (const cat of categories) {
-        const candidates = await fetchBotByCategory({ data: { category: cat, amount: perCategory } });
-        if (candidates && (candidates as any[]).length > 0) {
-          const BATCH = 25;
-          for (let i = 0; i < (candidates as any[]).length; i += BATCH) {
-            const batch = (candidates as any[]).slice(i, i + BATCH);
-            await saveBotProducts({ data: { products: batch } });
-            totalSaved += batch.length;
-            setProgress({ current: totalSaved, total: categories.length * perCategory });
-          }
+    let catIdx = 0;
+    let pageNum = 1;
+
+    while (runningRef.value) {
+      const cat = BOT_CATS[catIdx % BOT_CATS.length];
+      setStatus(`Fetching ${cat} products (page ${pageNum})...`);
+
+      try {
+        const candidates = await fetchBotByCategory({ data: { category: cat, amount: 10 } });
+        const toAdd = (candidates as any[]).filter(p => !existingIds.has(String(p.id)));
+
+        for (const p of toAdd) {
+          if (!runningRef.value) break;
+          // Write directly to Firestore client-side (rules: allow write: if true)
+          await setDoc(doc(db, "bot_products", String(p.id)), p);
+          existingIds.add(String(p.id));
+          total++;
+          setAdded(total);
+          setStatus(`✓ Added: ${p.title?.slice(0, 40)} | Total: ${total}`);
+          await new Promise(r => setTimeout(r, 500)); // 0.5s between each product
         }
+      } catch (e: any) {
+        setStatus(`⚠️ ${e.message} — retrying...`);
+        await new Promise(r => setTimeout(r, 2000));
       }
-      setProgress(p => ({ ...p, current: totalSaved }));
-      setDone(true);
-    } catch (e: any) {
-      setError(e.message || "Bot failed. Try again.");
+
+      // Move to next page / category
+      pageNum++;
+      if (pageNum > 52) { pageNum = 1; catIdx++; }
+      await new Promise(r => setTimeout(r, 1000));
     }
 
+    setStatus(`Stopped. ${total} products added.`);
     setRunning(false);
   };
 
-  const pct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
+  const stopBot = () => {
+    runningRef.value = false;
+    setRunning(false);
+  };
 
   return (
     <div className="mt-4 flex flex-col gap-4">
       <div className="bg-white rounded-2xl p-5 border border-border/60 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <div>
             <h3 className="text-sm font-extrabold">Auto-Import Bot</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Fetches ~500 products across all categories with 20% markup</p>
+            <p className="text-xs text-muted-foreground">Keeps adding products automatically — no duplicates, 20% markup</p>
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
-            <Bot className={`w-6 h-6 text-primary ${running ? "animate-pulse" : ""}`} />
+          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${running ? "bg-green-100" : "bg-primary/10"}`}>
+            <Bot className={`w-5 h-5 ${running ? "text-green-600 animate-pulse" : "text-primary"}`} />
           </div>
         </div>
 
-        {running && (
-          <div className="mb-4 flex flex-col gap-2">
-            <div className="flex items-center justify-between text-xs font-semibold">
-              <span>{progress.current} products added</span>
-              <span className="text-primary">{pct}%</span>
-            </div>
-            <div className="w-full h-3 bg-secondary rounded-full overflow-hidden">
-              <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
-            </div>
-          </div>
-        )}
+        <div className="bg-secondary/60 rounded-xl p-3 mb-4 min-h-[48px]">
+          <p className="text-xs font-semibold">{status || "Ready — click Start to begin"}</p>
+          {added > 0 && <p className="text-[11px] text-primary font-bold mt-0.5">{added} products added to your store</p>}
+        </div>
 
-        {done && !running && (
-          <div className="mb-4 bg-green-50 rounded-xl p-3 border border-green-200 flex items-center gap-2">
-            <Check className="w-4 h-4 text-green-600 shrink-0" />
-            <p className="text-xs text-green-700 font-semibold">Done! {progress.current} products added to your store.</p>
-          </div>
-        )}
-
-        {error && (
-          <div className="mb-4 bg-destructive/10 rounded-xl p-3 border border-destructive/20">
-            <p className="text-xs text-destructive font-semibold">{error}</p>
-          </div>
-        )}
-
-        <button
-          onClick={runBot}
-          disabled={running}
-          className="w-full flex items-center justify-center gap-2 bg-primary text-white font-extrabold py-3.5 rounded-full hover:opacity-90 active:scale-[0.98] transition disabled:opacity-60 shadow-lg"
-        >
-          {running ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          {running ? `Adding products... (${progress.current} added)` : "Run Bot Now — Add 500 Products"}
-        </button>
+        <div className="flex gap-2">
+          <button onClick={startBot} disabled={running}
+            className="flex-1 flex items-center justify-center gap-2 bg-primary text-white font-extrabold py-3.5 rounded-full hover:opacity-90 disabled:opacity-40 transition shadow-lg">
+            <Play className="w-4 h-4" /> {running ? "Running..." : "Start Bot"}
+          </button>
+          <button onClick={stopBot} disabled={!running}
+            className="px-5 bg-destructive/10 text-destructive font-bold py-3.5 rounded-full hover:bg-destructive/20 disabled:opacity-30 transition">
+            Stop
+          </button>
+        </div>
       </div>
 
       <div>
@@ -513,7 +514,7 @@ function BotTab() {
           {botProducts.length === 0 && !running && (
             <div className="text-center py-8 bg-white rounded-2xl border border-border/60">
               <Bot className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">No bot products yet. Click Run Bot Now.</p>
+              <p className="text-sm text-muted-foreground">Start the bot to auto-import products</p>
             </div>
           )}
         </div>
