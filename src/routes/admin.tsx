@@ -422,11 +422,6 @@ function BotTab() {
     setRunning(true);
     setAdded(0);
     let total = 0;
-
-    // Get existing IDs to skip duplicates
-    const existingSnap = await getDocs(collection(db, "bot_products"));
-    const existingIds = new Set(existingSnap.docs.map(d => d.id));
-
     let catIdx = 0;
     let pageNum = 1;
 
@@ -435,36 +430,35 @@ function BotTab() {
       setStatus(`Fetching ${cat} page ${pageNum}...`);
 
       try {
-        // Fetch all 10 products from this page at once
+        // Pass page number so each call gets DIFFERENT products
         const candidates = await fetchBotByCategory({ data: { category: cat, amount: 10, page: pageNum } });
-        const newProducts = (candidates as any[]).filter(p => !existingIds.has(String(p.id)));
+        const items = candidates as any[];
 
-        if (newProducts.length > 0) {
-          // Save all new products in parallel — no delay between products
+        if (items.length > 0) {
+          // Save ALL 10 products in parallel instantly
           await Promise.all(
-            newProducts.map(p => {
-              existingIds.add(String(p.id));
-              return setDoc(doc(db, "bot_products", String(p.id)), p);
-            })
+            items.map(p => setDoc(doc(db, "bot_products", String(p.id)), p))
           );
-          total += newProducts.length;
+          total += items.length;
           setAdded(total);
-          setStatus(`✓ +${newProducts.length} from ${cat} p${pageNum} | Total: ${total}`);
+          setStatus(`✓ +${items.length} ${cat} (page ${pageNum}) | Total: ${total}`);
         } else {
-          setStatus(`↩ Skipped ${cat} p${pageNum} (all duplicates) | Total: ${total}`);
+          setStatus(`Empty page — moving to next...`);
         }
       } catch (e: any) {
-        setStatus(`⚠️ ${e.message} — retrying...`);
-        await new Promise(r => setTimeout(r, 2000));
+        setStatus(`⚠️ Error: ${e.message}`);
+        await new Promise(r => setTimeout(r, 1000));
       }
 
-      // Move to next page immediately, then wait 500ms before next fetch
+      // Advance page, cycle categories every 52 pages
       pageNum++;
       if (pageNum > 52) { pageNum = 1; catIdx++; }
-      await new Promise(r => setTimeout(r, 500));
+
+      // 200ms between fetches = ~50 pages/min = ~500 products/min
+      await new Promise(r => setTimeout(r, 200));
     }
 
-    setStatus(`Stopped. ${total} products added.`);
+    setStatus(`Stopped. ${total} products added to your store.`);
     setRunning(false);
   };
 

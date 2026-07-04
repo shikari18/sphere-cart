@@ -577,34 +577,27 @@ export const saveBotProducts = createServerFn({ method: "POST" })
 
 // ── Bot: fetch products by category from CJ catalog ──────────────────────────
 export const fetchBotByCategory = createServerFn({ method: "POST" })
-  .handler(async ({ data }: { data: { category: string; amount: number; customPrice?: number } }) => {
+  .handler(async ({ data }: { data: { category: string; amount: number; customPrice?: number; page?: number } }) => {
     const token = await getAccessToken();
-    const { category, amount, customPrice } = data;
+    const { category, amount, customPrice, page = 1 } = data;
     const allItems: any[] = [];
-    // CJ returns exactly 10 items per page in content[0].productList
-    // So we need amount/10 pages to get `amount` items
-    const pagesNeeded = Math.ceil(amount / 10);
 
-    for (let page = 1; page <= pagesNeeded && allItems.length < amount; page++) {
-      try {
-        const res = await fetch(
-          `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${page}&pageSize=10&keyWord=${encodeURIComponent(category)}`,
-          { headers: { "CJ-Access-Token": token } }
-        );
-        const json = await res.json();
-        if (json.code === 200 && json.data?.content?.length > 0) {
-          const list = json.data.content[0]?.productList || [];
-          allItems.push(...list);
-        } else {
-          break; // no more pages
-        }
-      } catch { break; }
-    }
+    try {
+      const res = await fetch(
+        `https://developers.cjdropshipping.com/api2.0/v1/product/listV2?pageNum=${page}&pageSize=10&keyWord=${encodeURIComponent(category)}`,
+        { headers: { "CJ-Access-Token": token } }
+      );
+      const json = await res.json();
+      if (json.code === 200 && json.data?.content?.length > 0) {
+        const list = json.data.content[0]?.productList || [];
+        allItems.push(...list);
+      }
+    } catch {}
 
-    console.log(`[Bot] Fetched ${allItems.length} ${category} items from ${pagesNeeded} pages`);
+    console.log(`[Bot] Cat:${category} Page:${page} Got:${allItems.length} items`);
 
     const now = new Date();
-    return allItems.slice(0, amount).map((item: any) => {
+    return allItems.map((item: any) => {
       const id = String(item.id || item.pid || Math.random());
       const title = item.nameEn || item.productNameEn || "Product";
       const image = item.bigImage || item.productImage || "";
