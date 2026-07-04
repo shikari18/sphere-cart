@@ -441,9 +441,10 @@ function BotTab() {
           );
           total += items.length;
           setAdded(total);
-          setStatus(`✓ +${items.length} ${cat} (page ${pageNum}) | Total: ${total}`);
-        } else {
-          setStatus(`Empty page — moving to next...`);
+          // Only update status every 50 products to avoid UI noise
+          if (total % 50 === 0 || pageNum === 1) {
+            setStatus(`Bulk importing ${cat} — ${total} products added so far`);
+          }
         }
       } catch (e: any) {
         setStatus(`⚠️ Error: ${e.message}`);
@@ -473,7 +474,7 @@ function BotTab() {
         <div className="flex items-center justify-between mb-3">
           <div>
             <h3 className="text-sm font-extrabold">Auto-Import Bot</h3>
-            <p className="text-xs text-muted-foreground">Keeps adding products automatically — no duplicates, 20% markup</p>
+            <p className="text-xs text-muted-foreground">Keeps adding products automatically — no duplicates, 15% markup</p>
           </div>
           <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${running ? "bg-green-100" : "bg-primary/10"}`}>
             <Bot className={`w-5 h-5 ${running ? "text-green-600 animate-pulse" : "text-primary"}`} />
