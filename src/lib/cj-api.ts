@@ -217,7 +217,7 @@ export const fetchCjProducts = createServerFn({ method: "GET" })
         const priceUSD = parseFloat(priceUSDStr);
 
         const rate = 15.0;
-        const markup = 1.4;
+        const markup = 1.15;
         const costGHC = isNaN(priceUSD) ? 15 : priceUSD * rate;
         let priceGHC = isBot
           ? parseFloat(String(item.price || costGHC * 1.15))
@@ -540,7 +540,7 @@ export const adminGetCjProducts = createServerFn({ method: "GET" })
       const priceUSDStr = rawSellPrice.toString().split("-")[0].trim();
       const priceUSD = parseFloat(priceUSDStr);
       const rate = 15.0;
-      const markup = 1.4;
+      const markup = 1.15;
       const costGHC = isNaN(priceUSD) ? 15 : priceUSD * rate;
       const basePrice = parseFloat((costGHC * markup).toFixed(2));
       const currentPrice = firestorePriceOverrides[id] !== undefined ? firestorePriceOverrides[id] : basePrice;
@@ -613,7 +613,7 @@ export const fetchBotByCategory = createServerFn({ method: "POST" })
       const rawSellPrice = (item.sellPrice || item.nowPrice || "10.0").toString().split(" ")[0].split("-")[0].trim();
       const priceUSD = parseFloat(rawSellPrice) || 10;
       const costGHC = priceUSD * 15;
-      const priceGHC = customPrice !== undefined ? customPrice : parseFloat((costGHC * 1.20).toFixed(2));
+      const priceGHC = customPrice !== undefined ? customPrice : parseFloat((costGHC * 1.15).toFixed(2));
       const originalGHC = parseFloat((priceGHC * 2).toFixed(2));
       const discountSteps = [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70];
       const badge = `-${discountSteps[Math.abs(id.charCodeAt(0) || 0) % discountSteps.length]}%`;

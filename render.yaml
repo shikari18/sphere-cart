@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: zova-shop
+    name: mbshop
     runtime: node
     buildCommand: npm install && npm run build
     startCommand: node .output/server/index.mjs
@@ -9,3 +9,10 @@ services:
         value: 20
       - key: PORT
         value: 10000
+
+  - type: cron
+    name: mbshop-bot
+    runtime: node
+    schedule: "*/5 * * * *"
+    buildCommand: npm install
+    startCommand: node -e "fetch('https://shopping-9ln6.onrender.com/api/bot-cron?secret=mbshop_bot_2024').then(r=>r.json()).then(d=>console.log('Bot run:',JSON.stringify(d))).catch(e=>console.error('Bot error:',e.message))"
