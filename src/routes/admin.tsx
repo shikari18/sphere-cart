@@ -432,31 +432,36 @@ function BotTab() {
 
     while (runningRef.value) {
       const cat = BOT_CATS[catIdx % BOT_CATS.length];
-      setStatus(`Fetching ${cat} products (page ${pageNum})...`);
+      setStatus(`Fetching ${cat} page ${pageNum}...`);
 
       try {
-        const candidates = await fetchBotByCategory({ data: { category: cat, amount: 10 } });
-        const toAdd = (candidates as any[]).filter(p => !existingIds.has(String(p.id)));
+        // Fetch all 10 products from this page at once
+        const candidates = await fetchBotByCategory({ data: { category: cat, amount: 10, page: pageNum } });
+        const newProducts = (candidates as any[]).filter(p => !existingIds.has(String(p.id)));
 
-        for (const p of toAdd) {
-          if (!runningRef.value) break;
-          // Write directly to Firestore client-side (rules: allow write: if true)
-          await setDoc(doc(db, "bot_products", String(p.id)), p);
-          existingIds.add(String(p.id));
-          total++;
+        if (newProducts.length > 0) {
+          // Save all new products in parallel — no delay between products
+          await Promise.all(
+            newProducts.map(p => {
+              existingIds.add(String(p.id));
+              return setDoc(doc(db, "bot_products", String(p.id)), p);
+            })
+          );
+          total += newProducts.length;
           setAdded(total);
-          setStatus(`✓ Added: ${p.title?.slice(0, 40)} | Total: ${total}`);
-          await new Promise(r => setTimeout(r, 500)); // 0.5s between each product
+          setStatus(`✓ +${newProducts.length} from ${cat} p${pageNum} | Total: ${total}`);
+        } else {
+          setStatus(`↩ Skipped ${cat} p${pageNum} (all duplicates) | Total: ${total}`);
         }
       } catch (e: any) {
         setStatus(`⚠️ ${e.message} — retrying...`);
         await new Promise(r => setTimeout(r, 2000));
       }
 
-      // Move to next page / category
+      // Move to next page immediately, then wait 500ms before next fetch
       pageNum++;
       if (pageNum > 52) { pageNum = 1; catIdx++; }
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 500));
     }
 
     setStatus(`Stopped. ${total} products added.`);

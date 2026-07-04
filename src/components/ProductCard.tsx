@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import type { Product } from "@/data/products";
 import { useCart } from "@/hooks/use-cart";
+import { useCurrency } from "@/hooks/use-currency";
 import { fetchCjVariants, type CJVariant } from "@/lib/cj-api";
 
 // ─── Product Detail Sheet (Temu-style) ───────────────────────────────────────
@@ -32,6 +33,7 @@ function ProductSheet({
   onClose: () => void;
 }) {
   const { addItem, items } = useCart();
+  const currency = useCurrency();
   const [qty, setQty] = useState(1);
   const [colorIndex, setColorIndex] = useState(0);
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
@@ -193,10 +195,10 @@ function ProductSheet({
 
             {/* Price row */}
             <div className="flex items-baseline gap-2 mt-2">
-              <span className="text-2xl font-extrabold text-destructive">₵{displayPrice.toFixed(2)}</span>
+              <span className="text-2xl font-extrabold text-destructive">{currency.format(displayPrice)}</span>
               {product.original > displayPrice && (
                 <>
-                  <span className="text-sm text-muted-foreground line-through">₵{product.original.toFixed(2)}</span>
+                  <span className="text-sm text-muted-foreground line-through">{currency.format(product.original)}</span>
                   <span className="text-xs font-bold text-destructive bg-destructive/10 rounded px-1">
                     {discount > 0 ? `-${discount}% OFF` : "SALE"}
                   </span>
@@ -304,6 +306,7 @@ function ProductSheet({
 
 export function ProductCard({ product }: { product: Product }) {
   const [open, setOpen] = useState(false);
+  const currency = useCurrency();
 
   return (
     <>
@@ -337,13 +340,13 @@ export function ProductCard({ product }: { product: Product }) {
           </p>
           <div className="flex items-center justify-between gap-1">
             <div className="flex items-baseline gap-1">
-              <span className="text-[10px] font-semibold text-primary">₵</span>
+              <span className="text-[10px] font-semibold text-primary">{currency.symbol}</span>
               <span className="text-lg font-extrabold text-primary leading-none">
-                {product.price.toFixed(2)}
+                {currency.convert(product.price).toFixed(2)}
               </span>
               {product.original > product.price && (
                 <span className="text-[10px] text-muted-foreground line-through">
-                  ₵{product.original.toFixed(2)}
+                  {currency.format(product.original)}
                 </span>
               )}
             </div>
@@ -393,8 +396,8 @@ export function FloatingCart() {
       </div>
       <span className="text-[9px] font-bold text-primary mt-0.5 leading-none">Cart</span>
       {count > 0 && (
-        <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 text-[8px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-1.5 whitespace-nowrap">
-          Free shipping
+        <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 text-[8px] font-bold text-primary bg-primary/10 border border-primary/20 rounded-full px-1.5 whitespace-nowrap">
+          {count} items
         </span>
       )}
     </Link>

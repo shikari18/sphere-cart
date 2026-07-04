@@ -5,6 +5,7 @@ import { PhoneShell } from "@/components/PhoneShell";
 import { BottomNav } from "@/components/BottomNav";
 import { useCart } from "@/hooks/use-cart";
 import { useAuth } from "@/hooks/use-auth";
+import { useCurrency } from "@/hooks/use-currency";
 import { createCjOrder } from "@/lib/cj-api";
 
 export const Route = createFileRoute("/cart")({
@@ -16,6 +17,7 @@ type CheckoutStep = "cart" | "shipping" | "submitting" | "success" | "error";
 function CartPage() {
   const { items, removeItem, updateQty, clearCart, count } = useCart();
   const { isLoggedIn, profile } = useAuth();
+  const currency = useCurrency();
   const navigate = useNavigate();
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [checkoutStep, setCheckoutStep] = useState<CheckoutStep>("cart");
@@ -56,6 +58,8 @@ function CartPage() {
   const selected = items.filter((c) => checked[c.id] !== false);
   const selectedTotal = selected.reduce((s, c) => s + c.price * c.qty, 0);
   const savings = selected.reduce((s, c) => s + (c.original - c.price) * c.qty, 0);
+  const DELIVERY_FEE = 40; // ₵40 delivery fee
+  const totalWithDelivery = selectedTotal + DELIVERY_FEE;
 
   const handleCheckoutSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -187,9 +191,17 @@ function CartPage() {
         <form onSubmit={handleCheckoutSubmit} className="p-4 flex flex-col gap-4 pb-24">
           <div className="bg-secondary/50 rounded-2xl p-4 border border-border/40 mb-2">
             <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-2">Order Summary</h3>
-            <div className="flex justify-between items-center text-sm font-semibold">
+            <div className="flex justify-between items-center text-sm font-semibold mb-1">
               <span>Items ({selected.length})</span>
-              <span>₵{selectedTotal.toFixed(2)}</span>
+              <span>{currency.format(selectedTotal)}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm font-semibold mb-1">
+              <span>Delivery</span>
+              <span>{currency.format(DELIVERY_FEE)}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm font-extrabold border-t border-border/60 pt-2 mt-1">
+              <span>Grand Total</span>
+              <span className="text-primary">{currency.format(totalWithDelivery)}</span>
             </div>
           </div>
 
@@ -358,7 +370,7 @@ function CartPage() {
               type="submit"
               className="w-full bg-flame hover:bg-flame/90 text-white font-extrabold text-base py-3.5 rounded-full shadow-2xl transition active:scale-[0.98]"
             >
-              Submit Order
+              Submit Order · {currency.format(totalWithDelivery)}
             </button>
           </div>
         </form>
@@ -399,11 +411,6 @@ function CartPage() {
           <button className="ml-auto w-9 h-9 flex items-center justify-center rounded-full hover:bg-black/5">
             <MoreVertical className="w-5 h-5" />
           </button>
-        </div>
-
-        <div className="mx-4 mb-3 flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
-          <p className="text-xs font-semibold text-emerald-700">✓ Free shipping special for you</p>
-          <span className="text-[10px] text-emerald-700/80 font-medium">Limited-time</span>
         </div>
 
         <div className="mx-4 mb-3 flex items-center gap-2 rounded-lg bg-secondary px-3 py-2">
@@ -461,10 +468,10 @@ function CartPage() {
                   <div className="flex items-center justify-between mt-1">
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-base font-extrabold text-flame">
-                        ₵{c.price.toFixed(2)}
+                        {currency.format(c.price)}
                       </span>
                       {c.original > c.price && (
-                        <span className="text-[11px] text-muted-foreground line-through">₵{c.original.toFixed(2)}</span>
+                        <span className="text-[11px] text-muted-foreground line-through">{currency.format(c.original)}</span>
                       )}
                       {c.badge && (
                         <span className="text-[10px] bg-flame/10 text-flame border border-flame/30 rounded px-1 font-bold">
@@ -502,14 +509,15 @@ function CartPage() {
             <div className="flex flex-col items-start pl-4 pr-2">
               <div className="flex items-baseline gap-1">
                 {selectedTotal + savings > selectedTotal && (
-                  <span className="text-[10px] line-through text-white/60">₵{(selectedTotal + savings).toFixed(2)}</span>
+                  <span className="text-[10px] line-through text-white/60">{currency.format(selectedTotal + savings)}</span>
                 )}
               </div>
               <div className="flex items-baseline gap-1 text-flame">
-                <span className="text-xs">₵</span>
-                <span className="text-lg font-extrabold leading-none">{selectedTotal.toFixed(2)}</span>
+                <span className="text-xs">{currency.symbol}</span>
+                <span className="text-lg font-extrabold leading-none">{currency.convert(totalWithDelivery).toFixed(2)}</span>
                 <span className="text-[10px] text-flame/80">▲</span>
               </div>
+              <span className="text-[9px] text-white/60">incl. {currency.format(DELIVERY_FEE)} delivery</span>
             </div>
             {isLoggedIn ? (
               <button
@@ -522,7 +530,7 @@ function CartPage() {
               >
                 <p className="text-sm font-extrabold">Checkout ({selected.length})</p>
                 {savings > 0 && (
-                  <p className="text-[10px] font-semibold text-white/90">Save ₵{savings.toFixed(2)}</p>
+                  <p className="text-[10px] font-semibold text-white/90">Save {currency.format(savings)}</p>
                 )}
               </button>
             ) : (
