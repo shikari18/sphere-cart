@@ -6,7 +6,7 @@ import { BottomNav } from "@/components/BottomNav";
 import { ProductCard, FloatingCart } from "@/components/ProductCard";
 import { categoryList } from "@/data/products";
 import { fetchCjProducts } from "@/lib/cj-api";
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, limit } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 export const Route = createFileRoute("/")({
@@ -198,9 +198,12 @@ function Home() {
 
   // Real-time bot products from Firestore — auto-updates when bot adds new ones
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "bot_products"), (snap) => {
-      setBotProducts(snap.docs.map((d) => ({ ...d.data() } as any)));
-    });
+    const unsub = onSnapshot(
+      query(collection(db, "bot_products"), orderBy("addedAt", "desc"), limit(200)),
+      (snap) => {
+        setBotProducts(snap.docs.map((d) => ({ ...d.data() } as any)));
+      }
+    );
     return unsub;
   }, []);
 
